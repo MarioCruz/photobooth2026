@@ -122,23 +122,35 @@ def on_take_photos():
 window = tk.Tk()
 window.title("Photo Booth")
 
-label_welcome = tk.Label(window, text=EVENT_TITLE, font=("Helvetica", 22, "bold"))
+# Kiosk mode: no window manager is running, so "-fullscreen" (an EWMH/WM
+# hint) has nothing to act on it and the window shrinks to fit its content
+# at the default 0,0 position. Size and place it to the actual screen
+# directly instead, and center this content frame within that root.
+screen_w = window.winfo_screenwidth()
+screen_h = window.winfo_screenheight()
+window.geometry(f"{screen_w}x{screen_h}+0+0")
+window.bind("<Escape>", lambda e: window.destroy())
+
+content = tk.Frame(window)
+content.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+label_welcome = tk.Label(content, text=EVENT_TITLE, font=("Helvetica", 22, "bold"))
 label_welcome.pack(pady=(20, 5), fill=tk.BOTH, anchor=tk.CENTER)
 
 if EVENT_HASHTAG:
-    label_hashtag = tk.Label(window, text=EVENT_HASHTAG, font=("Helvetica", 14))
+    label_hashtag = tk.Label(content, text=EVENT_HASHTAG, font=("Helvetica", 14))
     label_hashtag.pack(pady=(0, 10), anchor=tk.CENTER)
 
 image = Image.open("mtm.png")
 photo = ImageTk.PhotoImage(image)
-label_image = tk.Label(window, image=photo)
+label_image = tk.Label(content, image=photo)
 label_image.pack(pady=10)
 
-countdown_label = tk.Label(window, text="", font=("Helvetica", 60, "bold"), fg="blue")
+countdown_label = tk.Label(content, text="", font=("Helvetica", 60, "bold"), fg="blue")
 countdown_label.pack(pady=10)
 
 button_take_photos = tk.Button(
-    window,
+    content,
     text="Take Photos",
     font=("Helvetica", 15, "bold"),
     command=on_take_photos,
@@ -147,19 +159,16 @@ button_take_photos = tk.Button(
 )
 button_take_photos.pack(padx=40, pady=20, fill=tk.BOTH, anchor=tk.CENTER)
 
-pending_label = tk.Label(window, text="", font=("Helvetica", 11), fg="darkorange")
+pending_label = tk.Label(content, text="", font=("Helvetica", 11), fg="darkorange")
 pending_label.pack(pady=(0, 5))
 
-qr_frame = tk.Frame(window)
+qr_frame = tk.Frame(content)
 qr_label = tk.Label(qr_frame)
 qr_label.pack()
 url_label = tk.Label(qr_frame, font=("Helvetica", 11), fg="gray")
 url_label.pack()
 scan_label = tk.Label(qr_frame, text="Scan to view & download your photos", font=("Helvetica", 13, "bold"))
 scan_label.pack(before=qr_label)
-
-window.geometry("1024x768")
-window.eval("tk::PlaceWindow . center")
 
 update_pending_label()
 window.after(2000, periodic_retry)  # give the app a moment to draw first

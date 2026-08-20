@@ -1,19 +1,75 @@
 # Photobooth2023
 
-New Photo booth that send email vs Tweet For Maker Faire Miami 2023
+Event photo booth for a Raspberry Pi + Pi Camera. Guests step up, hit
+**Take Photos**, and get a QR code on screen that opens a web gallery
+where they (and everyone else at the event) can view and download their
+photos. No email, no Twitter/X — photos go straight to S3.
 
-**Stuff I had to install  **<br/>
-pip install picamera  <br/>
-sudo apt-get install python3-tk  <br/>
-sudo apt-get install python3-pil python3-pil.imagetk <br/>
-using smtp2go.com
+## How it works
 
-Useful links 
-https://picamera.readthedocs.io/en/release-1.13/recipes1.html?highlight=text#overlaying-text-on-the-output
+1. `Photobooth2.py` runs the Tkinter UI on the Pi and drives the camera
+   (`camera.py`, using `picamera2`).
+2. Captured photos upload to S3 under `s3://<bucket>/<event-name>/photos/`
+   (`gallery.py`), and get added to a shared `manifest.json` for that event.
+3. A QR code (`qr.py`) encodes a link to the static gallery page
+   (`website/`) hosted on S3, e.g.
+   `http://<bucket>.s3-website-<region>.amazonaws.com/?event=<name>&session=<id>`.
+4. The gallery page fetches that event's `manifest.json` and renders every
+   photo taken so far, newest first — the guest's own photos (matched by
+   `session`) are tagged **Yours**.
 
-You will need a Raspberry Pi have and a Camera conected
-https://projects.raspberrypi.org/en/projects/getting-started-with-picamera/2
+Each event is just a folder (S3 key prefix) inside one bucket — no need to
+create a new bucket per event, just change `[event] name` in `config.ini`.
 
+## One-time AWS setup
+
+Requires the AWS CLI configured with a profile that can create S3/IAM
+resources (this project used a profile named `PITA`).
+
+```
+./deploy/setup_aws.sh
+```
+
+This creates the S3 bucket (static website hosting + public-read objects
+only, nothing listable/writable by the public), an IAM user scoped to just
+that bucket, and an access key. It's idempotent — safe to re-run.
+
+Copy the printed access key + website endpoint into `config.ini` (copy
+`config.example.ini` to `config.ini` first — it's gitignored since it holds
+live credentials).
+
+Whenever `website/` changes, republish it with:
+
+```
+./deploy/deploy_site.sh
+```
+
+## Raspberry Pi setup
+
+```
+sudo apt-get install python3-tk python3-pil python3-pil.imagetk
+pip install -r requirements.txt
+```
+
+`requirements.txt` includes `picamera2` (the modern libcamera-based camera
+library — replaces the deprecated `picamera` this project used to use).
+
+Fill in `config.ini` (event name/title, AWS bucket + region + credentials,
+website base URL), then run:
+
+```
+python3 Photobooth2.py
+```
+
+If `picamera2` isn't available (e.g. developing off-Pi), `camera.py`
+automatically falls back to generating placeholder photos, so the rest of
+the pipeline (S3 upload, gallery, QR) can be built and tested without
+hardware.
+
+## Changing/adding an event
+
+Edit `[event] name` in `config.ini` and restart the app. New events get
+their own manifest automatically on first upload.
 
 ![pi-camera-attached](https://user-images.githubusercontent.com/1426877/227970625-08ccf26c-f8ca-4326-8524-e4d1b1b046fe.jpg)
-Photo from Raspberry Pi Foundation 
+Photo from Raspberry Pi Foundation

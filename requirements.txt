@@ -1,0 +1,4 @@
+picamera2
+boto3
+qrcode[pil]
+Pillow

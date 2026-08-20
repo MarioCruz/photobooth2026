@@ -3,14 +3,19 @@
 guests can retrieve them from a web gallery. No email, no Twitter/X."""
 
 import configparser
+import os
 import tkinter as tk
+import uuid
 from tkinter import messagebox
 
 from PIL import Image, ImageTk
 
+import pending
 from camera import capture_images
 from gallery import GalleryUploader
 from qr import make_qr_image
+
+RETRY_INTERVAL_MS = 2 * 60 * 1000  # re-attempt any queued uploads every 2 minutes
 
 config = configparser.ConfigParser()
 config.read("config.ini")
@@ -48,20 +53,63 @@ def hide_qr():
     url_label.config(text="")
 
 
+def update_pending_label():
+    count = len(pending.load())
+    pending_label.config(text=f"{count} session(s) waiting to upload…" if count else "")
+
+
+def retry_pending_uploads():
+    """Retry any sessions that failed to upload earlier. Photos are never
+    lost on a failed upload -- they stay in pics/ and queued in
+    pics/pending_uploads.json until this succeeds."""
+    for record in pending.load():
+        files = [f for f in record["files"] if os.path.exists(f)]
+        if not files:
+            pending.remove(record["session_id"])  # local files gone, nothing left to retry
+            continue
+        try:
+            uploader.upload_session(
+                files, session_id=record["session_id"], event_slug=record["event_slug"]
+            )
+            pending.remove(record["session_id"])
+        except Exception:
+            pass  # still no connection -- leave it queued, try again next interval
+    update_pending_label()
+
+
+def periodic_retry():
+    retry_pending_uploads()
+    window.after(RETRY_INTERVAL_MS, periodic_retry)
+
+
 def on_take_photos():
     hide_qr()
     button_take_photos.config(state=tk.DISABLED, text="Taking photos…")
     window.update()
 
+    session_id = uuid.uuid4().hex[:8]
     try:
         image_files = capture_images(
-            NUM_PHOTOS, resolution=RESOLUTION, on_countdown=on_countdown, logo_path=LOGO_PATH
+            NUM_PHOTOS,
+            resolution=RESOLUTION,
+            on_countdown=on_countdown,
+            logo_path=LOGO_PATH,
+            session_id=session_id,
         )
         button_take_photos.config(text="Uploading…")
         window.update()
 
-        gallery_url = uploader.upload_session(image_files)
-        show_qr(gallery_url)
+        try:
+            gallery_url = uploader.upload_session(image_files, session_id=session_id)
+            show_qr(gallery_url)
+        except Exception as upload_err:
+            pending.add(session_id, uploader.event_slug, image_files)
+            update_pending_label()
+            messagebox.showwarning(
+                "Saved, upload pending",
+                "Photos are saved and will upload automatically once the "
+                f"connection is back. ({upload_err})",
+            )
     except Exception as e:
         messagebox.showerror("Error", f"Something went wrong: {e}")
     finally:
@@ -99,6 +147,9 @@ button_take_photos = tk.Button(
 )
 button_take_photos.pack(padx=40, pady=20, fill=tk.BOTH, anchor=tk.CENTER)
 
+pending_label = tk.Label(window, text="", font=("Helvetica", 11), fg="darkorange")
+pending_label.pack(pady=(0, 5))
+
 qr_frame = tk.Frame(window)
 qr_label = tk.Label(qr_frame)
 qr_label.pack()
@@ -109,5 +160,8 @@ scan_label.pack(before=qr_label)
 
 window.geometry("1024x768")
 window.eval("tk::PlaceWindow . center")
+
+update_pending_label()
+window.after(2000, periodic_retry)  # give the app a moment to draw first
 
 window.mainloop()

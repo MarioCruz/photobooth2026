@@ -7,7 +7,7 @@ rest of the pipeline (S3 upload, gallery, QR) can be built/tested off-Pi.
 
 import os
 import time
-from datetime import date
+import uuid
 
 from PIL import Image, ImageDraw
 
@@ -34,7 +34,7 @@ def _apply_logo(image_path, logo_path):
     photo.convert("RGB").save(image_path)
 
 
-def _capture_with_picamera2(num_images, resolution, on_countdown, logo_path):
+def _capture_with_picamera2(num_images, resolution, on_countdown, logo_path, session_id):
     picam2 = Picamera2()
     config = picam2.create_still_configuration(main={"size": resolution})
     picam2.configure(config)
@@ -42,7 +42,6 @@ def _capture_with_picamera2(num_images, resolution, on_countdown, logo_path):
     time.sleep(2)  # let auto-exposure/white-balance settle
 
     os.makedirs("pics", exist_ok=True)
-    today = date.today().strftime("%Y-%m-%d")
     image_files = []
 
     try:
@@ -54,7 +53,7 @@ def _capture_with_picamera2(num_images, resolution, on_countdown, logo_path):
             if on_countdown:
                 on_countdown(None)
 
-            image_file = f"pics/booth_{today}_{i}.jpg"
+            image_file = f"pics/{session_id}-{i}.jpg"
             picam2.capture_file(image_file)
             _apply_logo(image_file, logo_path)
             image_files.append(image_file)
@@ -64,9 +63,8 @@ def _capture_with_picamera2(num_images, resolution, on_countdown, logo_path):
     return image_files
 
 
-def _capture_with_mock(num_images, resolution, on_countdown, logo_path):
+def _capture_with_mock(num_images, resolution, on_countdown, logo_path, session_id):
     os.makedirs("pics", exist_ok=True)
-    today = date.today().strftime("%Y-%m-%d")
     image_files = []
 
     for i in range(num_images):
@@ -77,7 +75,7 @@ def _capture_with_mock(num_images, resolution, on_countdown, logo_path):
         if on_countdown:
             on_countdown(None)
 
-        image_file = f"pics/booth_{today}_{i}.jpg"
+        image_file = f"pics/{session_id}-{i}.jpg"
         img = Image.new("RGB", resolution, color=(40 + i * 40, 90, 160))
         draw = ImageDraw.Draw(img)
         draw.text((40, 40), f"MOCK PHOTO {i + 1}", fill="white")
@@ -88,12 +86,17 @@ def _capture_with_mock(num_images, resolution, on_countdown, logo_path):
     return image_files
 
 
-def capture_images(num_images, resolution=(1920, 1080), on_countdown=None, logo_path=None):
-    """Capture `num_images` photos. Returns a list of local file paths.
+def capture_images(
+    num_images, resolution=(1920, 1080), on_countdown=None, logo_path=None, session_id=None
+):
+    """Capture `num_images` photos. Returns a list of local file paths,
+    named pics/<session_id>-<n>.jpg so concurrent/same-day sessions never
+    overwrite each other's files (important for the upload-retry queue).
 
     on_countdown(n): optional callback invoked with 3, 2, 1, then None
     right before each shutter, so the UI can display a countdown.
     """
+    session_id = session_id or uuid.uuid4().hex[:8]
     if HAVE_PICAMERA2:
-        return _capture_with_picamera2(num_images, resolution, on_countdown, logo_path)
-    return _capture_with_mock(num_images, resolution, on_countdown, logo_path)
+        return _capture_with_picamera2(num_images, resolution, on_countdown, logo_path, session_id)
+    return _capture_with_mock(num_images, resolution, on_countdown, logo_path, session_id)

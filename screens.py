@@ -11,13 +11,12 @@ from PIL import Image, ImageDraw, ImageFont
 from collage import make_collage
 from qr import make_qr_image
 
-# Deep aubergine rather than black: it reads as an evening/party set, and
-# being dark and low-saturation it still lets the photos carry the screen.
-# Must stay in step with the hex values in Photobooth2.py, or the rendered
-# stage and the Tk header/footer show a seam.
-BG = (27, 22, 48)
-FG = (246, 242, 255)
-MUTED = (167, 155, 196)
+# Near-black, so the photos and the white QR card carry the screen. Must stay
+# in step with the hex values in Photobooth2.py, or the rendered stage and the
+# Tk header/footer show a seam.
+BG = (17, 17, 17)
+FG = (245, 245, 245)
+MUTED = (154, 154, 154)
 
 _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Raspberry Pi OS

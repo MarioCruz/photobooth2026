@@ -34,17 +34,16 @@ UPLOAD_GRACE_MS = 20 * 1000  # extra wait for a slow upload after the collage, b
 EVENT_POLL_MS = 100  # how often the Tk thread drains events from other threads
 COLLAGE_SAVE_SIZE = (2048, 1536)  # the 4-up grid, saved and uploaded as its own photo
 
-# Party palette: deep aubergine ground with a warm coral call-to-action.
-# Dark enough that the photos stay the brightest thing on screen, coloured
-# enough not to read as a terminal. BG/FG/MUTED must match screens.py's RGB
+# Near-black ground: the photos stay the brightest thing on screen and the
+# white QR card reads at a distance. BG/FG/MUTED must match screens.py's RGB
 # tuples exactly, or the rendered stage seams against the Tk header/footer.
-BG = "#1b1630"
-FG = "#f6f2ff"
-MUTED = "#a79bc4"
-WARN = "#ffc15e"
+BG = "#111111"
+FG = "#f5f5f5"
+MUTED = "#9a9a9a"
+WARN = "#ffb347"
 ERR = "#ff6b6b"
-ACCENT = "#ff5c8a"
-ACCENT_ACTIVE = "#ff85a6"
+ACCENT = "#1e6fff"
+ACCENT_ACTIVE = "#4b8bff"
 
 # Everything (config.ini, pics/, mtm.png) is addressed relative to this
 # file's directory, so the app works no matter where it's launched from
@@ -164,7 +163,7 @@ button_take_photos = tk.Button(
     font=("Helvetica", 18, "bold"),
     command=lambda: start_session(),
     bg=ACCENT, fg="white", activebackground=ACCENT_ACTIVE, activeforeground="white",
-    disabledforeground="#ffd6e2", bd=0, highlightthickness=0, padx=36, pady=10,
+    disabledforeground="#cfd8ff", bd=0, highlightthickness=0, padx=36, pady=10,
 )
 button_take_photos.pack()
 

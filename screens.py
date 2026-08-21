@@ -11,9 +11,13 @@ from PIL import Image, ImageDraw, ImageFont
 from collage import make_collage
 from qr import make_qr_image
 
-BG = (17, 17, 17)
-FG = (245, 245, 245)
-MUTED = (154, 154, 154)
+# Deep aubergine rather than black: it reads as an evening/party set, and
+# being dark and low-saturation it still lets the photos carry the screen.
+# Must stay in step with the hex values in Photobooth2.py, or the rendered
+# stage and the Tk header/footer show a seam.
+BG = (27, 22, 48)
+FG = (246, 242, 255)
+MUTED = (167, 155, 196)
 
 _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Raspberry Pi OS
@@ -30,6 +34,22 @@ def font(size):
         return ImageFont.load_default(size=size)  # Pillow >= 10.1
     except TypeError:
         return ImageFont.load_default()
+
+
+def logo_badge(path, size, pad_ratio=0.1):
+    """The logo on a white disc.
+
+    mtm.png is black ink on transparency, so dropped straight onto a dark
+    background the gear and lettering disappear and only the white inner
+    circle survives. Sitting it on a white disc keeps the mark exactly as
+    drawn while making it legible on any background."""
+    badge = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ImageDraw.Draw(badge).ellipse([0, 0, size - 1, size - 1], fill=(255, 255, 255, 255))
+    inner = int(size * (1 - 2 * pad_ratio))
+    logo = Image.open(path).convert("RGBA")
+    logo.thumbnail((inner, inner), Image.LANCZOS)
+    badge.paste(logo, ((size - logo.width) // 2, (size - logo.height) // 2), logo)
+    return badge
 
 
 def fit(size, box):
@@ -59,7 +79,7 @@ def render_qr_screen(stage, url, heading, caption, lift=0):
     img = Image.new("RGB", stage, BG)
     d = ImageDraw.Draw(img)
 
-    qr = make_qr_image(url, size=int(h * 0.58))
+    qr = make_qr_image(url, size=int(h * 0.55))
     pad = qr.width // 16
     card = qr.width + 2 * pad
     cx, cy = w // 2, h // 2 + h // 40 - lift

@@ -34,12 +34,17 @@ UPLOAD_GRACE_MS = 20 * 1000  # extra wait for a slow upload after the collage, b
 EVENT_POLL_MS = 100  # how often the Tk thread drains events from other threads
 COLLAGE_SAVE_SIZE = (2048, 1536)  # the 4-up grid, saved and uploaded as its own photo
 
-BG = "#111111"
-FG = "#f5f5f5"
-MUTED = "#9a9a9a"
-WARN = "#ffb347"
+# Party palette: deep aubergine ground with a warm coral call-to-action.
+# Dark enough that the photos stay the brightest thing on screen, coloured
+# enough not to read as a terminal. BG/FG/MUTED must match screens.py's RGB
+# tuples exactly, or the rendered stage seams against the Tk header/footer.
+BG = "#1b1630"
+FG = "#f6f2ff"
+MUTED = "#a79bc4"
+WARN = "#ffc15e"
 ERR = "#ff6b6b"
-ACCENT = "#1e6fff"
+ACCENT = "#ff5c8a"
+ACCENT_ACTIVE = "#ff85a6"
 
 # Everything (config.ini, pics/, mtm.png) is addressed relative to this
 # file's directory, so the app works no matter where it's launched from
@@ -105,8 +110,9 @@ window.bind("<Escape>", lambda e: window.destroy())
 # stage (everything visual, rendered as one image by screens.py), footer
 # (status, button, logo) -- so no screen state can push another off the display.
 HEADER_H = max(70, screen_h // 11)
-# Tall enough for the button plus the big arrow pointing down at the real one.
-FOOTER_H = max(140, screen_h // 6)
+# Tall enough for the button, the big arrow pointing down at the real one,
+# and a logo badge with some presence.
+FOOTER_H = max(160, screen_h // 5)
 STAGE = (screen_w, screen_h - HEADER_H - FOOTER_H)
 # While posing, the live view takes the whole screen rather than the middle
 # band -- a 4:3 frame inside a 16:9 stage is height-limited, so giving it the
@@ -157,8 +163,8 @@ button_take_photos = tk.Button(
     text="Take Photos",
     font=("Helvetica", 18, "bold"),
     command=lambda: start_session(),
-    bg=ACCENT, fg="white", activebackground="#4b8bff", activeforeground="white",
-    disabledforeground="#cfd8ff", bd=0, highlightthickness=0, padx=36, pady=10,
+    bg=ACCENT, fg="white", activebackground=ACCENT_ACTIVE, activeforeground="white",
+    disabledforeground="#ffd6e2", bd=0, highlightthickness=0, padx=36, pady=10,
 )
 button_take_photos.pack()
 
@@ -179,10 +185,9 @@ def blink_arrow():
     window.after(ARROW_BLINK_MS, blink_arrow)
 
 if os.path.exists("mtm.png"):
-    logo_img = Image.open("mtm.png")
-    logo_img.thumbnail((FOOTER_H - 20, FOOTER_H - 20))
-    logo_photo = ImageTk.PhotoImage(logo_img)
-    tk.Label(footer, image=logo_photo, bg=BG).grid(row=0, column=2, sticky="e", padx=24)
+    # On a white disc so the black mark stays legible against the dark ground.
+    logo_photo = ImageTk.PhotoImage(screens.logo_badge("mtm.png", FOOTER_H - 16))
+    tk.Label(footer, image=logo_photo, bg=BG, bd=0).grid(row=0, column=2, sticky="e", padx=28)
 
 
 def show(img):

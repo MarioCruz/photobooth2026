@@ -1,4 +1,5 @@
 config.ini
+EVENTS.local.md
 pics/
 __pycache__/
 *.pyc

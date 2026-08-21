@@ -129,10 +129,33 @@ hardware.
 
 ## Changing/adding an event
 
-Edit `[event] name`/`title` in `config.ini`, blank out `slug` so a fresh
-unguessable one is generated, and restart the app. New events get their
-own manifest automatically on first upload. Local photos accumulate in
-`pics/` as a backup — clear it between events.
+Edit `[event]` in `config.ini` on the Pi and restart the app
+(`pkill -f 'Photobooth2[.]py'` — the kiosk relaunches itself):
+
+- `slug` — **leave blank to start a new event**; the app generates an
+  unguessable code and saves it back to `config.ini` on next start. Set it
+  to a previous code to return to that gallery.
+- `title` — headlines the web gallery. `hashtag` — shown under the QR.
+- `name` — your own label; guests never see it.
+
+New events get their own manifest automatically on first upload.
+
+A slug **is** that gallery's access control — anyone holding it can view
+the photos, and nothing else guards them. So codes are not committed:
+they live in `config.ini` (gitignored) and, for convenience, a gitignored
+`EVENTS.local.md`. Write a new slug down when you create one, because it
+exists nowhere else — there is no way to list events from the bucket, by
+design.
+
+Clearing an event's photos:
+
+```
+aws s3 rm s3://<bucket>/<slug>/ --recursive --profile PITA
+ssh admin@PhotoBooth.local "rm -f photobooth2026/pics/*.jpg photobooth2026/pics/pending_uploads.json"
+```
+
+Local photos accumulate in `pics/` as the only backup until each one
+reaches S3, so clear them only once the gallery has what you want.
 
 ![pi-camera-attached](https://user-images.githubusercontent.com/1426877/227970625-08ccf26c-f8ca-4326-8524-e4d1b1b046fe.jpg)
 Photo from Raspberry Pi Foundation

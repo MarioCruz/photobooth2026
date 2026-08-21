@@ -3,7 +3,7 @@ on-screen right after capture, before the QR code."""
 
 import math
 
-from PIL import Image, ImageOps
+from PIL import Image
 
 
 def load_scaled(path, box):
@@ -16,27 +16,6 @@ def load_scaled(path, box):
     img = Image.open(path)
     img.draft("RGB", box)  # no-op for non-JPEG; picks a 1/2, 1/4, 1/8... scale
     return img
-
-
-def make_strip(image_paths, max_size, gap=12, bg=(20, 20, 20)):
-    """The photos in a single row, filling the frame edge to edge.
-
-    A 2x2 grid of 4:3 photos is itself 4:3, so on a 16:9 screen it can only
-    ever be height-limited with wide empty margins. A row of four fills the
-    width instead, at the cost of centre-cropping each photo towards
-    portrait -- fine for one person, less so for a group spread wide."""
-    n = max(1, len(image_paths))
-    max_w, max_h = max_size
-    cell_w = (max_w - gap * (n + 1)) // n
-    cell_h = max_h - 2 * gap
-
-    strip = Image.new("RGB", (max_w, max_h), bg)
-    for i, path in enumerate(image_paths):
-        img = load_scaled(path, (cell_w, cell_h))
-        # ImageOps.fit centre-crops to the target aspect, then resizes.
-        cell = ImageOps.fit(img.convert("RGB"), (cell_w, cell_h), Image.LANCZOS, centering=(0.5, 0.5))
-        strip.paste(cell, (gap + i * (cell_w + gap), gap))
-    return strip
 
 
 def save_collage(image_paths, out_path, size=(2048, 1536), gap=24, bg=(20, 20, 20), quality=90):

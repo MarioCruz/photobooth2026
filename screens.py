@@ -8,7 +8,7 @@ from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont
 
-from collage import make_collage, make_strip
+from collage import make_collage
 from qr import make_qr_image
 
 # Near-black, so the photos and the white QR card carry the screen. Must stay
@@ -118,17 +118,13 @@ def render_preview(stage, frame, count=None, label=""):
     return img
 
 
-def render_collage(stage, image_files, caption="", layout="grid"):
-    """The session's photos filling the stage, with an optional caption.
-
-    layout "grid" is a 2x2 (uncropped, but leaves margins on a wide screen);
-    "strip" is a single row filling the width, centre-cropped to fit."""
+def render_collage(stage, image_files, caption=""):
+    """The session's photos in a 2x2 grid, with an optional caption above."""
     w, h = stage
     cap_h = int(h * 0.14) if caption else 0
     body = (w, h - cap_h)
     gap = max(8, h // 60)
-    build = make_strip if layout == "strip" else make_collage
-    photos = build(image_files, body, gap=gap, bg=BG)
+    photos = make_collage(image_files, body, gap=gap, bg=BG)
 
     if not caption:
         return photos

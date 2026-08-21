@@ -6,6 +6,18 @@ import math
 from PIL import Image
 
 
+def load_scaled(path, box):
+    """Open a JPEG decoded no larger than needed to fill `box`.
+
+    draft() lets libjpeg downscale in the DCT domain during decode, so a
+    full-resolution photo never has to exist in memory -- at 8MP that's
+    the difference between ~24MB and ~1MB per image, which matters on a
+    512MB Pi rendering several photos at once."""
+    img = Image.open(path)
+    img.draft("RGB", box)  # no-op for non-JPEG; picks a 1/2, 1/4, 1/8... scale
+    return img
+
+
 def make_collage(image_paths, max_size, gap=12, bg=(20, 20, 20)):
     """Return a single PIL Image of exactly max_size with image_paths
     arranged in a roughly square grid (2x2 for 4 photos). Photos are
@@ -34,8 +46,11 @@ def make_collage(image_paths, max_size, gap=12, bg=(20, 20, 20)):
     y0 = (max_h - grid_h) // 2
 
     collage = Image.new("RGB", (max_w, max_h), bg)
-    for i, img in enumerate(images):
-        thumb = img.copy()
+    for i, thumb in enumerate(images):
+        # Decode straight down to roughly thumbnail size (see load_scaled);
+        # the layout above was computed from the header sizes, before any
+        # pixels were read, so drafting now doesn't disturb it.
+        thumb.draft("RGB", (thumb_w, thumb_h))
         thumb.thumbnail((thumb_w, thumb_h))
         col, row = i % cols, i // cols
         x = x0 + col * (thumb_w + gap) + (thumb_w - thumb.width) // 2

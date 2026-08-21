@@ -14,6 +14,8 @@ import uuid
 
 from PIL import Image, ImageDraw
 
+from collage import load_scaled
+
 try:
     from picamera2 import Picamera2
 
@@ -86,37 +88,41 @@ def _capture_with_picamera2(
     num_images, resolution, preview_size, on_countdown, on_preview, on_shot, logo_path, session_id
 ):
     picam2 = Picamera2()
-    # A *video* configuration streams frames fast enough for a smooth live
-    # preview (a still configuration flushes the whole pipeline per frame --
-    # only ~5fps on a Pi 3A+). capture_file() still writes a full main-stream
-    # JPEG for the actual photo, so preview and photo share one FOV. The
-    # lores stream feeds the preview cheaply so grabbing a frame doesn't wait
-    # on the full-res main buffer.
-    # Capture the preview from a deliberately small lores stream: the
-    # per-frame YUV->RGB conversion cost scales with its pixel count, so a
-    # ~640px-wide stream previews far faster on a Pi 3A+ than a full-size
-    # one, then we upscale the little frame to the display size (cheap).
-    lores_size = _fit(preview_size, (640, 360))
-    config = picam2.create_video_configuration(
-        main={"size": resolution},
-        lores={"size": lores_size},
+    # Two modes, switched at the shutter:
+    #
+    # preview -- a light *video* configuration that streams smoothly (a
+    #   still configuration flushes the whole pipeline per frame, ~5fps on
+    #   a Pi 3A+). Its main stream is deliberately small and RGB888: the
+    #   per-frame cost scales with pixel count, and the pipeline's lores
+    #   stream is YUV420, which PIL can't take without a conversion that
+    #   costs more than it saves. The small frame is upscaled to display
+    #   size afterwards, which is cheap.
+    # still -- the full sensor resolution, used only for the actual photo.
+    #   Streaming this continuously would exhaust the Pi's CMA pool, so we
+    #   switch into it per shot and drop straight back to the preview mode.
+    #
+    # Both are the same aspect ratio, so the live preview frames what the
+    # photo will actually capture.
+    preview_config = picam2.create_video_configuration(
+        main={"size": _fit(resolution, (640, 480)), "format": "RGB888"},
         display=None,
         buffer_count=4,
     )
-    picam2.configure(config)
+    still_config = picam2.create_still_configuration(main={"size": resolution}, buffer_count=1)
+    picam2.configure(preview_config)
     picam2.start()
 
     os.makedirs("pics", exist_ok=True)
 
     def grab_frame():
-        # lores is YUV420; capture_image handles the conversion to RGB.
-        return picam2.capture_image("lores").resize(preview_size, Image.BILINEAR)
+        return picam2.capture_image("main").resize(preview_size, Image.BILINEAR)
 
     def take_photo(i):
         path = f"pics/{session_id}-{i}.jpg"
-        picam2.capture_file(path)
+        picam2.switch_mode_and_capture_file(still_config, path)
         _apply_logo(path, logo_path)
-        shot = Image.open(path).resize(preview_size, Image.BILINEAR)
+        shot = load_scaled(path, preview_size)  # never decodes the full 8MP frame
+        shot.thumbnail(preview_size)
         return path, shot
 
     try:

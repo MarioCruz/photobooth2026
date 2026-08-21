@@ -91,30 +91,42 @@ def _capture_with_picamera2(
     try:
         # Two modes, switched at the shutter:
         #
-        # preview -- a light *video* configuration that streams smoothly (a
-        #   still configuration flushes the whole pipeline per frame, ~5fps on
-        #   a Pi 3A+). Its main stream is deliberately small and RGB888: the
-        #   per-frame cost scales with pixel count, and the pipeline's lores
-        #   stream is YUV420, which PIL can't take without a conversion that
-        #   costs more than it saves. The small frame is upscaled to display
-        #   size afterwards, which is cheap.
+        # preview -- a *video* configuration, which streams far faster than a
+        #   still one (that flushes the whole pipeline per frame). RGB888 so
+        #   PIL can take the frame directly; the lores stream is YUV420, whose
+        #   conversion costs more than it saves.
         # still -- the full sensor resolution, used only for the actual photo.
         #   Streaming this continuously would exhaust the Pi's CMA pool, so we
         #   switch into it per shot and drop straight back to the preview mode.
         #
-        # Both are the same aspect ratio, so the live preview frames what the
-        # photo will actually capture.
-        preview_config = picam2.create_video_configuration(
-            main={"size": _fit(resolution, (640, 480)), "format": "RGB888"},
-            display=None,
-            buffer_count=4,
-        )
+        # The sensor *mode* matters as much as the size. On the imx219 a small
+        # main stream (640x480) is served from a centre crop of the sensor --
+        # 1280x960 out of 3280x2464 -- so the live view is zoomed well inside
+        # what the photo actually captures and guests frame themselves wrong.
+        # Pinning the raw stream to half the still resolution selects the
+        # binned full-sensor mode instead, so preview and photo share one field
+        # of view; the main stream is ISP-scaled down from that, which is cheap.
+        full_fov_raw = (resolution[0] // 2, resolution[1] // 2)
+        preview_main = _fit(resolution, preview_size)
+        try:
+            preview_config = picam2.create_video_configuration(
+                main={"size": preview_main, "format": "RGB888"},
+                raw={"size": full_fov_raw},
+                display=None,
+                buffer_count=3,
+            )
+        except Exception:
+            # Unknown sensor: let picamera2 pick the mode rather than fail.
+            preview_config = picam2.create_video_configuration(
+                main={"size": preview_main, "format": "RGB888"}, display=None, buffer_count=3
+            )
         still_config = picam2.create_still_configuration(main={"size": resolution}, buffer_count=1)
 
         os.makedirs("pics", exist_ok=True)
 
         def grab_frame():
-            return picam2.capture_image("main").resize(preview_size, Image.BILINEAR)
+            frame = picam2.capture_image("main")
+            return frame if frame.size == preview_size else frame.resize(preview_size, Image.BILINEAR)
 
         def take_photo(i):
             path = f"pics/{session_id}-{i}.jpg"

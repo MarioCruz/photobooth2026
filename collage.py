@@ -18,6 +18,14 @@ def load_scaled(path, box):
     return img
 
 
+def save_collage(image_paths, out_path, size=(2048, 1536), gap=24, bg=(20, 20, 20), quality=90):
+    """Write the grid out as a real photo, so guests get the 4-up strip as a
+    single shareable image alongside the individual shots. Returns out_path."""
+    collage = make_collage(image_paths, max_size=size, gap=gap, bg=bg)
+    collage.save(out_path, "JPEG", quality=quality, optimize=True)
+    return out_path
+
+
 def make_collage(image_paths, max_size, gap=12, bg=(20, 20, 20)):
     """Return a single PIL Image of exactly max_size with image_paths
     arranged in a roughly square grid (2x2 for 4 photos). Photos are

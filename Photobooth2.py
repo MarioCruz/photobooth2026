@@ -23,6 +23,7 @@ from PIL import Image, ImageTk
 import pending
 import screens
 from camera import capture_images
+from collage import save_collage
 from gallery import GalleryUploader
 
 RETRY_INTERVAL_MS = 2 * 60 * 1000  # re-attempt any queued uploads every 2 minutes
@@ -31,6 +32,7 @@ SESSION_QR_DISPLAY_MS = 15 * 1000  # then show that guest's QR before returning 
 FAILURE_NOTICE_MS = 4 * 1000  # how long "saved, will upload later" stays up
 UPLOAD_GRACE_MS = 20 * 1000  # extra wait for a slow upload after the collage, before freeing the booth
 EVENT_POLL_MS = 100  # how often the Tk thread drains events from other threads
+COLLAGE_SAVE_SIZE = (2048, 1536)  # the 4-up grid, saved and uploaded as its own photo
 
 BG = "#111111"
 FG = "#f5f5f5"
@@ -105,7 +107,11 @@ window.bind("<Escape>", lambda e: window.destroy())
 HEADER_H = max(70, screen_h // 11)
 FOOTER_H = max(80, screen_h // 10)
 STAGE = (screen_w, screen_h - HEADER_H - FOOTER_H)
-PREVIEW_SIZE = screens.fit(RESOLUTION, (STAGE[0] - 24, STAGE[1] - 24))
+# While posing, the live view takes the whole screen rather than the middle
+# band -- a 4:3 frame inside a 16:9 stage is height-limited, so giving it the
+# header and footer rows back makes it noticeably bigger to frame yourself in.
+PREVIEW_STAGE = (screen_w, screen_h)
+PREVIEW_SIZE = screens.fit(RESOLUTION, (PREVIEW_STAGE[0] - 16, PREVIEW_STAGE[1] - 16))
 
 header = tk.Frame(window, bg=BG)
 header.place(x=0, y=0, width=screen_w, height=HEADER_H)
@@ -116,6 +122,10 @@ if EVENT_HASHTAG:
 stage_photo = ImageTk.PhotoImage("RGB", STAGE)
 stage_label = tk.Label(window, image=stage_photo, bg=BG, bd=0, highlightthickness=0)
 stage_label.place(x=0, y=HEADER_H, width=STAGE[0], height=STAGE[1])
+
+# Full-screen overlay used only while posing (see PREVIEW_STAGE above).
+preview_photo = ImageTk.PhotoImage("RGB", PREVIEW_STAGE)
+preview_label = tk.Label(window, image=preview_photo, bg=BG, bd=0, highlightthickness=0)
 
 footer = tk.Frame(window, bg=BG)
 footer.place(x=0, y=HEADER_H + STAGE[1], width=screen_w, height=FOOTER_H)
@@ -151,6 +161,17 @@ def show(img):
     stage_photo.paste(img)
 
 
+def show_fullscreen_preview(img):
+    preview_photo.paste(img)
+    if not preview_label.winfo_ismapped():
+        preview_label.place(x=0, y=0, width=PREVIEW_STAGE[0], height=PREVIEW_STAGE[1])
+        preview_label.lift()
+
+
+def hide_fullscreen_preview():
+    preview_label.place_forget()
+
+
 def set_status(text, color=WARN):
     status_label.config(text=text, fg=color)
 
@@ -184,6 +205,7 @@ def refresh_pending_status():
 
 def go_idle():
     cancel_timers()
+    hide_fullscreen_preview()  # belt and braces if a session ended unusually
     state.update(phase="idle", session_id=None, files=[], upload=None, collage_done=False)
     show(screens.render_qr_screen(
         STAGE, PARTY_GALLERY_URL,
@@ -201,7 +223,9 @@ live = {"frame": None, "count": None, "label": ""}
 
 
 def _redraw_live():
-    show(screens.render_preview(STAGE, live["frame"], live["count"], live["label"]))
+    show_fullscreen_preview(
+        screens.render_preview(PREVIEW_STAGE, live["frame"], live["count"], live["label"])
+    )
     window.update()
 
 
@@ -243,16 +267,29 @@ def start_session():
             preview_size=PREVIEW_SIZE,
         )
     except Exception as e:
+        hide_fullscreen_preview()
         set_status(f"Camera problem: {e}", ERR)
         state["phase"] = "notice"
         schedule(FAILURE_NOTICE_MS, go_idle)
         return
 
+    hide_fullscreen_preview()
+
+    # Save the 4-up grid as a photo in its own right, so guests can share the
+    # whole strip as one image. It rides along as the session's last photo, so
+    # it uploads, retries and appears in the gallery like any other. Failing to
+    # build it must not cost anyone their actual photos.
+    try:
+        files = files + [save_collage(files, f"pics/{state['session_id']}-collage.jpg",
+                                      size=COLLAGE_SAVE_SIZE)]
+    except Exception as e:
+        print(f"collage save failed, continuing with individual photos: {e}")
+
     # Journal the complete capture immediately. Rendering or process failure
     # after this point cannot orphan the session from startup retries.
     pending.add(state["session_id"], uploader.event_slug, files)
     state.update(phase="collage", files=files)
-    show(screens.render_collage(STAGE, files))
+    show(screens.render_collage(STAGE, files[:-1] if len(files) > 1 else files))
     button_take_photos.config(text="Uploading…")
     set_status("Uploading your photos…")
     with _uploading_lock:

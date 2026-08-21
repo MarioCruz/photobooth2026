@@ -33,6 +33,8 @@ FAILURE_NOTICE_MS = 4 * 1000  # how long "saved, will upload later" stays up
 UPLOAD_GRACE_MS = 20 * 1000  # extra wait for a slow upload after the collage, before freeing the booth
 EVENT_POLL_MS = 100  # how often the Tk thread drains events from other threads
 COLLAGE_SAVE_SIZE = (2048, 1536)  # the 4-up grid, saved and uploaded as its own photo
+# Set from several state transitions, so keep it in one place.
+BUTTON_IDLE_TEXT = "Push Button to Take Photos"
 
 # Near-black ground: the photos stay the brightest thing on screen and the
 # white QR card reads at a distance. BG/FG/MUTED must match screens.py's RGB
@@ -162,7 +164,7 @@ footer.rowconfigure(0, weight=1)
 
 status_label = tk.Label(
     footer, text="", font=("Helvetica", 15), bg=BG, fg=WARN,
-    anchor="w", justify="left", wraplength=screen_w // 2 - 80,
+    anchor="w", justify="left", wraplength=screen_w // 3 - 60,
 )
 status_label.grid(row=0, column=0, sticky="w", padx=24)
 
@@ -173,7 +175,7 @@ button_column.grid(row=0, column=1, sticky="n", pady=(4, 0))
 
 button_take_photos = tk.Button(
     button_column,
-    text="Take Photos",
+    text=BUTTON_IDLE_TEXT,
     font=("Helvetica", 18, "bold"),
     command=lambda: start_session(),
     bg=ACCENT, fg="white", activebackground=ACCENT_ACTIVE, activeforeground="white",
@@ -259,7 +261,7 @@ def go_idle():
         EVENT_HASHTAG,  # instruction moved to the header, so this slot is free
         lift=QR_LIFT_PX,
     ))
-    button_take_photos.config(state=tk.NORMAL, text="Take Photos")
+    button_take_photos.config(state=tk.NORMAL, text=BUTTON_IDLE_TEXT)
     refresh_pending_status()
 
 
@@ -371,7 +373,7 @@ def _upload_grace_expired():
     if state["phase"] != "collage" or state["upload"] is not None:
         return  # the upload resolved in time; this timer is stale
     state["phase"] = "notice"
-    button_take_photos.config(state=tk.NORMAL, text="Take Photos")
+    button_take_photos.config(state=tk.NORMAL, text=BUTTON_IDLE_TEXT)
     set_status(
         "Photos saved! They'll finish uploading in the background — "
         "scan the party code later to find them."
@@ -393,13 +395,13 @@ def _advance_after_collage():
         ))
         set_status("")
         # The next guest can start while this QR is up.
-        button_take_photos.config(state=tk.NORMAL, text="Take Photos")
+        button_take_photos.config(state=tk.NORMAL, text=BUTTON_IDLE_TEXT)
         schedule(SESSION_QR_DISPLAY_MS, go_idle)
     else:
         # Already in the pending queue (sessions enqueue before uploading);
         # the periodic retry finishes the job once the wifi is back.
         state["phase"] = "notice"
-        button_take_photos.config(state=tk.NORMAL, text="Take Photos")
+        button_take_photos.config(state=tk.NORMAL, text=BUTTON_IDLE_TEXT)
         set_status(
             "Saved! Your photos will upload automatically once the wifi is back. "
             f"({str(payload)[:80]})"

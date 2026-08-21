@@ -136,16 +136,28 @@ PREVIEW_SIZE = screens.fit(RESOLUTION, (PREVIEW_STAGE[0] - 16, PREVIEW_STAGE[1] 
 _screen_mm_h = window.winfo_screenmmheight() or 249
 QR_LIFT_PX = int(0.60 * (screen_h / (_screen_mm_h / 25.4)))
 
+# The header speaks for the current state: telling someone to press the
+# button while they're looking at photos they just took reads as an error.
+HEADLINE_IDLE = (f"Press the button for {NUM_PHOTOS} photos",
+                 f"Look at the camera — {NUM_PHOTOS} shots, 3-2-1 each")
+HEADLINE_READY = ("Your photos are ready!", "Scan the code to take them home")
+HEADLINE_SAVED = ("Photos saved!", "They'll upload as soon as the wifi is back")
+
 header = tk.Frame(window, bg=BG)
 header.place(x=0, y=0, width=screen_w, height=HEADER_H)
-tk.Label(
-    header, text=f"Press the button for {NUM_PHOTOS} photos",
-    font=("Helvetica", 44, "bold"), bg=BG, fg=FG,
-).pack(pady=(14, 0))
-tk.Label(
-    header, text=f"Look at the camera — {NUM_PHOTOS} shots, 3-2-1 each",
-    font=("Helvetica", 20, "bold"), bg=BG, fg=HINT,
-).pack(pady=(2, 0))
+headline_label = tk.Label(
+    header, text=HEADLINE_IDLE[0], font=("Helvetica", 44, "bold"), bg=BG, fg=FG,
+)
+headline_label.pack(pady=(14, 0))
+subhead_label = tk.Label(
+    header, text=HEADLINE_IDLE[1], font=("Helvetica", 20, "bold"), bg=BG, fg=HINT,
+)
+subhead_label.pack(pady=(2, 0))
+
+
+def set_headline(pair):
+    headline_label.config(text=pair[0])
+    subhead_label.config(text=pair[1])
 
 stage_photo = ImageTk.PhotoImage("RGB", STAGE)
 stage_label = tk.Label(window, image=stage_photo, bg=BG, bd=0, highlightthickness=0)
@@ -154,6 +166,15 @@ stage_label.place(x=0, y=HEADER_H, width=STAGE[0], height=STAGE[1])
 # Full-screen overlay used only while posing (see PREVIEW_STAGE above).
 preview_photo = ImageTk.PhotoImage("RGB", PREVIEW_STAGE)
 preview_label = tk.Label(window, image=preview_photo, bg=BG, bd=0, highlightthickness=0)
+
+# The collage reveal takes the header row as well as the stage. A 2x2 grid of
+# 4:3 photos is itself 4:3, and the stage band alone is nearly 3:1, so the
+# grid was height-limited to about half the screen width with wide black
+# margins. It stops short of the footer so the upload status and the button
+# stay visible for the next guest.
+COLLAGE_STAGE = (screen_w, HEADER_H + STAGE[1])
+collage_photo = ImageTk.PhotoImage("RGB", COLLAGE_STAGE)
+collage_label = tk.Label(window, image=collage_photo, bg=BG, bd=0, highlightthickness=0)
 
 footer = tk.Frame(window, bg=BG)
 footer.place(x=0, y=HEADER_H + STAGE[1], width=screen_w, height=FOOTER_H)
@@ -220,6 +241,17 @@ def hide_fullscreen_preview():
     preview_label.place_forget()
 
 
+def show_big_collage(img):
+    collage_photo.paste(img)
+    if not collage_label.winfo_ismapped():
+        collage_label.place(x=0, y=0, width=COLLAGE_STAGE[0], height=COLLAGE_STAGE[1])
+        collage_label.lift()
+
+
+def hide_big_collage():
+    collage_label.place_forget()
+
+
 def set_status(text, color=WARN):
     status_label.config(text=text, fg=color)
 
@@ -254,6 +286,8 @@ def refresh_pending_status():
 def go_idle():
     cancel_timers()
     hide_fullscreen_preview()  # belt and braces if a session ended unusually
+    hide_big_collage()
+    set_headline(HEADLINE_IDLE)
     state.update(phase="idle", session_id=None, files=[], upload=None, collage_done=False)
     show(screens.render_qr_screen(
         STAGE, PARTY_GALLERY_URL,
@@ -338,7 +372,10 @@ def start_session():
     # after this point cannot orphan the session from startup retries.
     pending.add(state["session_id"], uploader.event_slug, files)
     state.update(phase="collage", files=files)
-    show(screens.render_collage(STAGE, files[:-1] if len(files) > 1 else files))
+    # Show the individual shots, not the collage file that was just built from
+    # them -- otherwise the reveal is a grid containing a picture of itself.
+    show_big_collage(screens.render_collage(
+        COLLAGE_STAGE, files[:-1] if len(files) > 1 else files))
     button_take_photos.config(text="Uploading…")
     set_status("Uploading your photos…")
     with _uploading_lock:
@@ -373,6 +410,8 @@ def _upload_grace_expired():
     if state["phase"] != "collage" or state["upload"] is not None:
         return  # the upload resolved in time; this timer is stale
     state["phase"] = "notice"
+    hide_big_collage()
+    set_headline(HEADLINE_SAVED)
     button_take_photos.config(state=tk.NORMAL, text=BUTTON_IDLE_TEXT)
     set_status(
         "Photos saved! They'll finish uploading in the background — "
@@ -389,9 +428,11 @@ def _advance_after_collage():
     outcome, payload = state["upload"]
     if outcome == "ok":
         state["phase"] = "qr"
+        hide_big_collage()
+        set_headline(HEADLINE_READY)
         show(screens.render_qr_screen(
-            STAGE, payload, "Your photos are ready!",
-            "Scan to view & download your photos", lift=QR_LIFT_PX,
+            STAGE, payload, "Scan to view & download your photos",
+            EVENT_HASHTAG, lift=QR_LIFT_PX,
         ))
         set_status("")
         # The next guest can start while this QR is up.
@@ -401,6 +442,8 @@ def _advance_after_collage():
         # Already in the pending queue (sessions enqueue before uploading);
         # the periodic retry finishes the job once the wifi is back.
         state["phase"] = "notice"
+        hide_big_collage()
+        set_headline(HEADLINE_SAVED)
         button_take_photos.config(state=tk.NORMAL, text=BUTTON_IDLE_TEXT)
         set_status(
             "Saved! Your photos will upload automatically once the wifi is back. "

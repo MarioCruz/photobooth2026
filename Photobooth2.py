@@ -374,8 +374,15 @@ def start_session():
     state.update(phase="collage", files=files)
     # Show the individual shots, not the collage file that was just built from
     # them -- otherwise the reveal is a grid containing a picture of itself.
+    #
+    # On screen this is a strip: a row of four fills a 16:9 display, where a
+    # 2x2 of 4:3 photos can only be height-limited with wide empty margins,
+    # and it makes faces roughly 2.5x larger. It centre-crops to do that, so
+    # the *saved* collage stays an uncropped 2x2 -- nobody should be cut out
+    # of the copy they take home.
     show_big_collage(screens.render_collage(
-        COLLAGE_STAGE, files[:-1] if len(files) > 1 else files))
+        COLLAGE_STAGE, files[:-1] if len(files) > 1 else files,
+        caption="Here are your photos!", layout="strip"))
     button_take_photos.config(text="Uploading…")
     set_status("Uploading your photos…")
     with _uploading_lock:

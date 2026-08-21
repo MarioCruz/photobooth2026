@@ -27,8 +27,13 @@
   let index = 0;
 
   if (!event) {
-    statusEl.textContent =
-      "No event specified. Scan the QR code at the photo booth to open your event's gallery.";
+    // Reaching the bare domain is normal (someone typed it, or shared the
+    // domain without the event code). Each event lives behind an unguessable
+    // code, so there is deliberately nothing to list here.
+    subtitleEl.textContent = "Scan the QR code at the booth to open your photos.";
+    statusEl.innerHTML =
+      "<p>Every event has its own private gallery link.</p>" +
+      "<p>Scan the QR code shown on the photo booth screen — it opens straight to your photos.</p>";
     return;
   }
 

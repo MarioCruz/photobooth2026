@@ -35,7 +35,8 @@ body {
 
 .site-header h1 {
   margin: 0 0 0.25rem;
-  font-size: clamp(1.5rem, 4vw, 2.25rem);
+  font-size: clamp(1.6rem, 5vw, 2.5rem);
+  line-height: 1.15;
 }
 
 .subtitle {
@@ -55,7 +56,7 @@ main {
   padding: 0.75rem 1rem;
   border-radius: 10px;
   text-align: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .badge {
@@ -63,6 +64,13 @@ main {
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
   font-weight: 600;
+}
+
+.tap-hint {
+  text-align: center;
+  color: var(--muted);
+  margin: 0 0 1.25rem;
+  font-size: 0.95rem;
 }
 
 .status {
@@ -91,6 +99,16 @@ main {
   outline: 3px solid var(--accent);
 }
 
+/* The thumbnail itself is a button that opens the full-screen viewer. */
+.photo-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  display: block;
+  width: 100%;
+}
+
 .photo-card img {
   width: 100%;
   aspect-ratio: 4 / 3;
@@ -108,20 +126,25 @@ main {
   font-weight: 600;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
+  pointer-events: none;
 }
 
-.photo-card a.download {
+.card-action {
   display: block;
+  width: 100%;
   text-align: center;
-  padding: 0.6rem;
+  padding: 0.7rem;
   color: var(--accent);
-  text-decoration: none;
+  background: none;
+  font: inherit;
   font-weight: 600;
+  cursor: pointer;
+  border: 0;
   border-top: 1px solid var(--border);
 }
 
-.photo-card a.download:hover {
-  background: rgba(0, 0, 0, 0.04);
+.card-action:hover {
+  background: rgba(127, 127, 127, 0.1);
 }
 
 .site-footer {
@@ -129,4 +152,124 @@ main {
   color: var(--muted);
   padding: 2rem 1rem;
   font-size: 0.9rem;
+}
+
+/* ---- full-screen photo viewer ---- */
+
+.lb-open-body { overflow: hidden; }
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.94);
+  display: grid;
+  grid-template-rows: 1fr auto;
+}
+
+.lightbox[hidden] { display: none; }
+
+.lb-figure {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: max(0.5rem, env(safe-area-inset-top)) 0.5rem 0.5rem;
+}
+
+.lb-figure img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  /* Long-press must stay available -- on iOS that's how you save to Photos. */
+  -webkit-touch-callout: default;
+  touch-action: manipulation;
+}
+
+.lb-btn {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border: 0;
+  cursor: pointer;
+  border-radius: 999px;
+  line-height: 1;
+  z-index: 2;
+}
+
+.lb-btn:hover { background: rgba(255, 255, 255, 0.26); }
+
+.lb-close {
+  top: max(0.75rem, env(safe-area-inset-top));
+  right: 0.75rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  font-size: 1.9rem;
+}
+
+.lb-nav {
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3rem;
+  height: 3rem;
+  font-size: 2rem;
+}
+
+.lb-prev { left: 0.5rem; }
+.lb-next { right: 0.5rem; }
+
+.lb-bar {
+  text-align: center;
+  color: #fff;
+  padding: 0.85rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.lb-count {
+  display: block;
+  font-size: 0.85rem;
+  opacity: 0.75;
+  margin-bottom: 0.35rem;
+}
+
+.lb-hint {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.lb-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.lb-save {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.7rem 1.6rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lb-save[disabled] { opacity: 0.6; cursor: default; }
+
+.lb-open {
+  color: #fff;
+  opacity: 0.8;
+  text-decoration: underline;
+  font-size: 0.9rem;
+  padding: 0.5rem;
+}
+
+@media (max-width: 480px) {
+  .lb-nav { width: 2.5rem; height: 2.5rem; font-size: 1.6rem; }
+  .lb-hint { font-size: 0.95rem; }
 }

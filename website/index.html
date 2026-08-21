@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Photo Booth Gallery</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -16,6 +16,7 @@
   <div id="mine-banner" class="mine-banner" hidden>
     Your photos are ready — look for the <span class="badge">Yours</span> tag below.
   </div>
+  <p id="tap-hint" class="tap-hint" hidden>Tap any photo to view it full screen and save it.</p>
   <div id="status" class="status">Loading photos…</div>
   <div id="gallery" class="gallery"></div>
 </main>
@@ -23,6 +24,26 @@
 <footer class="site-footer">
   <p>Scan the QR code at the booth to come back here anytime.</p>
 </footer>
+
+<!-- Full-screen photo viewer -->
+<div id="lightbox" class="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo viewer">
+  <button id="lb-close" class="lb-btn lb-close" aria-label="Close">&times;</button>
+  <button id="lb-prev" class="lb-btn lb-nav lb-prev" aria-label="Previous photo">&#8249;</button>
+  <button id="lb-next" class="lb-btn lb-nav lb-next" aria-label="Next photo">&#8250;</button>
+
+  <figure class="lb-figure">
+    <img id="lb-img" alt="Event photo full screen">
+  </figure>
+
+  <div class="lb-bar">
+    <span id="lb-count" class="lb-count"></span>
+    <p id="lb-hint" class="lb-hint"></p>
+    <div class="lb-actions">
+      <button id="lb-save" class="lb-save" hidden>Save photo</button>
+      <a id="lb-open" class="lb-open" target="_blank" rel="noopener">Open original</a>
+    </div>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>

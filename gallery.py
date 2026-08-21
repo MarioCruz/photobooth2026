@@ -7,6 +7,7 @@ link into another event's photos, since the slug can't be guessed and the
 bucket has no public listing permission.
 """
 
+import io
 import json
 import os
 import secrets
@@ -16,6 +17,14 @@ import uuid
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+
+from collage import load_scaled
+
+# Grid thumbnails. Full 8MP photos are ~1.6MB each; a gallery of them costs a
+# guest tens of megabytes on venue wifi before anything appears. These are
+# ~40KB, and the full photo is still fetched when a photo is opened.
+THUMB_BOX = (640, 640)
+THUMB_QUALITY = 82
 
 
 def get_or_create_event_slug(config, config_path="config.ini"):
@@ -55,6 +64,31 @@ class GalleryUploader:
 
     def _manifest_key(self, event_slug):
         return f"{event_slug}/manifest.json"
+
+    @staticmethod
+    def thumb_key_for(photo_key):
+        """The gallery derives a thumbnail's location from the photo's, so the
+        manifest needs no extra field (and older manifests keep working)."""
+        return photo_key.replace("/photos/", "/thumbs/", 1)
+
+    def _upload_thumbnail(self, path, photo_key):
+        """Best-effort: a thumbnail that fails to upload just means the gallery
+        falls back to the full photo for that tile, so never fail a session
+        over one."""
+        try:
+            img = load_scaled(path, THUMB_BOX)  # decodes downscaled, not the full 8MP
+            img.thumbnail(THUMB_BOX)
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, "JPEG", quality=THUMB_QUALITY, optimize=True)
+            self.client.put_object(
+                Bucket=self.bucket,
+                Key=self.thumb_key_for(photo_key),
+                Body=buf.getvalue(),
+                ContentType="image/jpeg",
+                CacheControl="public, max-age=31536000",
+            )
+        except Exception:
+            pass
 
     def _load_manifest(self, event_slug):
         try:
@@ -111,6 +145,7 @@ class GalleryUploader:
                 self.client.upload_file(
                     path, self.bucket, key, ExtraArgs={"ContentType": content_type}
                 )
+                self._upload_thumbnail(path, key)
                 # Re-uploading the same stable object key is harmless, but
                 # each photo must appear in the event manifest only once.
                 if key not in known_photos:

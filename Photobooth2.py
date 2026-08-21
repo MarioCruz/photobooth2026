@@ -105,13 +105,20 @@ window.bind("<Escape>", lambda e: window.destroy())
 # stage (everything visual, rendered as one image by screens.py), footer
 # (status, button, logo) -- so no screen state can push another off the display.
 HEADER_H = max(70, screen_h // 11)
-FOOTER_H = max(80, screen_h // 10)
+# Tall enough for the button plus the big arrow pointing down at the real one.
+FOOTER_H = max(140, screen_h // 6)
 STAGE = (screen_w, screen_h - HEADER_H - FOOTER_H)
 # While posing, the live view takes the whole screen rather than the middle
 # band -- a 4:3 frame inside a 16:9 stage is height-limited, so giving it the
 # header and footer rows back makes it noticeably bigger to frame yourself in.
 PREVIEW_STAGE = (screen_w, screen_h)
 PREVIEW_SIZE = screens.fit(RESOLUTION, (PREVIEW_STAGE[0] - 16, PREVIEW_STAGE[1] - 16))
+
+# Raise the QR code off centre so it sits at a comfortable height to scan.
+# Derived from the display's reported physical size rather than hardcoded, so
+# it stays 0.6" on whatever screen the booth is plugged into.
+_screen_mm_h = window.winfo_screenmmheight() or 249
+QR_LIFT_PX = int(0.60 * (screen_h / (_screen_mm_h / 25.4)))
 
 header = tk.Frame(window, bg=BG)
 header.place(x=0, y=0, width=screen_w, height=HEADER_H)
@@ -140,15 +147,36 @@ status_label = tk.Label(
 )
 status_label.grid(row=0, column=0, sticky="w", padx=24)
 
+# Button sits high in the footer with an arrow beneath it, pointing down at
+# the physical button on the booth so guests know what to actually press.
+button_column = tk.Frame(footer, bg=BG)
+button_column.grid(row=0, column=1, sticky="n", pady=(4, 0))
+
 button_take_photos = tk.Button(
-    footer,
+    button_column,
     text="Take Photos",
     font=("Helvetica", 18, "bold"),
     command=lambda: start_session(),
     bg=ACCENT, fg="white", activebackground="#4b8bff", activeforeground="white",
     disabledforeground="#cfd8ff", bd=0, highlightthickness=0, padx=36, pady=10,
 )
-button_take_photos.grid(row=0, column=1)
+button_take_photos.pack()
+
+arrow_label = tk.Label(
+    button_column, text="▼", font=("Helvetica", 52, "bold"), bg=BG, fg=ACCENT
+)
+arrow_label.pack(pady=(0, 0))
+
+ARROW_BLINK_MS = 600
+_arrow_on = [True]
+
+
+def blink_arrow():
+    """Pulse the arrow so it draws the eye to the physical button. Kept off
+    state['timers'] so cancel_timers() during a session can't stop it."""
+    _arrow_on[0] = not _arrow_on[0]
+    arrow_label.config(fg=ACCENT if _arrow_on[0] else BG)
+    window.after(ARROW_BLINK_MS, blink_arrow)
 
 if os.path.exists("mtm.png"):
     logo_img = Image.open("mtm.png")
@@ -209,8 +237,9 @@ def go_idle():
     state.update(phase="idle", session_id=None, files=[], upload=None, collage_done=False)
     show(screens.render_qr_screen(
         STAGE, PARTY_GALLERY_URL,
-        "Press the button to take your photos!",
+        f"Press the button to take {NUM_PHOTOS} photos",
         "Scan to see everyone's photos from the party",
+        lift=QR_LIFT_PX,
     ))
     button_take_photos.config(state=tk.NORMAL, text="Take Photos")
     refresh_pending_status()
@@ -341,7 +370,8 @@ def _advance_after_collage():
     if outcome == "ok":
         state["phase"] = "qr"
         show(screens.render_qr_screen(
-            STAGE, payload, "Your photos are ready!", "Scan to view & download your photos"
+            STAGE, payload, "Your photos are ready!",
+            "Scan to view & download your photos", lift=QR_LIFT_PX,
         ))
         set_status("")
         # The next guest can start while this QR is up.
@@ -423,6 +453,7 @@ def periodic_retry():
 
 
 go_idle()
+blink_arrow()
 window.after(EVENT_POLL_MS, poll_events)
 window.after(2000, periodic_retry)  # give the app a moment to draw first
 

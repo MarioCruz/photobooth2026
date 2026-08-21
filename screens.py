@@ -49,9 +49,12 @@ def _paste_centered(canvas, img, center):
     canvas.paste(img, (int(center[0] - img.width / 2), int(center[1] - img.height / 2)))
 
 
-def render_qr_screen(stage, url, heading, caption):
+def render_qr_screen(stage, url, heading, caption, lift=0):
     """A QR code on a white card, heading above, caption + URL below.
-    Used both for the idle 'whole party' gallery and a guest's own session."""
+    Used both for the idle 'whole party' gallery and a guest's own session.
+
+    lift raises the card (and its caption) by that many pixels, so the code
+    sits at a comfortable height to scan rather than dead centre."""
     w, h = stage
     img = Image.new("RGB", stage, BG)
     d = ImageDraw.Draw(img)
@@ -59,15 +62,16 @@ def render_qr_screen(stage, url, heading, caption):
     qr = make_qr_image(url, size=int(h * 0.58))
     pad = qr.width // 16
     card = qr.width + 2 * pad
-    cx, cy = w // 2, h // 2 + h // 40
+    cx, cy = w // 2, h // 2 + h // 40 - lift
     d.rounded_rectangle(
         [cx - card // 2, cy - card // 2, cx + card // 2, cy + card // 2], radius=pad, fill="white"
     )
     _paste_centered(img, qr, (cx, cy))
 
+    # Heading stays put; caption/URL follow the card up so the grouping holds.
     _text_centered(d, (cx, h // 14), heading, font(h // 18), FG)
-    _text_centered(d, (cx, h - h // 9), caption, font(h // 30), FG)
-    _text_centered(d, (cx, h - h // 22), url, font(h // 45), MUTED)
+    _text_centered(d, (cx, h - h // 9 - lift), caption, font(h // 30), FG)
+    _text_centered(d, (cx, h - h // 22 - lift), url, font(h // 45), MUTED)
     return img
 
 

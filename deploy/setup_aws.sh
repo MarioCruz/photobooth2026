@@ -131,10 +131,11 @@ if [ -n "$EXISTING_KEYS" ]; then
   echo "       delete it in IAM if you need a fresh secret, then re-run this script."
 else
   echo "[create] access key"
-  aws_ iam create-access-key --user-name "$IAM_USER" --output json > /tmp/photobooth-access-key.json
-  ACCESS_KEY_ID=$(python3 -c "import json;print(json.load(open('/tmp/photobooth-access-key.json'))['AccessKey']['AccessKeyId'])")
-  SECRET_ACCESS_KEY=$(python3 -c "import json;print(json.load(open('/tmp/photobooth-access-key.json'))['AccessKey']['SecretAccessKey'])")
-  rm -f /tmp/photobooth-access-key.json
+  # Keep the secret in memory only -- never written to disk.
+  KEY_JSON=$(aws_ iam create-access-key --user-name "$IAM_USER" --output json)
+  ACCESS_KEY_ID=$(printf '%s' "$KEY_JSON" | python3 -c "import json,sys;print(json.load(sys.stdin)['AccessKey']['AccessKeyId'])")
+  SECRET_ACCESS_KEY=$(printf '%s' "$KEY_JSON" | python3 -c "import json,sys;print(json.load(sys.stdin)['AccessKey']['SecretAccessKey'])")
+  unset KEY_JSON
 
   echo
   echo "== Save these now — AWS will not show the secret again =="

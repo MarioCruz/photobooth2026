@@ -8,6 +8,7 @@ bucket has no public listing permission.
 """
 
 import json
+import os
 import secrets
 import threading
 import uuid
@@ -89,14 +90,32 @@ class GalleryUploader:
             if event_slug == self.event_slug:
                 manifest["title"] = self.event_title  # keep in sync with config.ini
 
+            # Normalize any duplicates left by an interrupted older upload,
+            # then use a set so foreground/retry races stay idempotent.
+            photos = list(dict.fromkeys(manifest.setdefault("photos", [])))
+            manifest["photos"] = photos
+            known_photos = set(photos)
+
             for i, path in enumerate(image_files):
                 ext = path.split(".")[-1].lower()
                 content_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
-                key = f"{event_slug}/photos/{session_id}-{i}.{ext}"
+                # Derive the key from the local filename (camera.py names
+                # them <session_id>-<n>.jpg) rather than the loop index, so a
+                # retry that can only find some of the photos still uploads
+                # each under its original number instead of renumbering them
+                # and overwriting a different shot.
+                stem = os.path.splitext(os.path.basename(path))[0]
+                if not stem.startswith(f"{session_id}-"):
+                    stem = f"{session_id}-{i}"
+                key = f"{event_slug}/photos/{stem}.{ext}"
                 self.client.upload_file(
                     path, self.bucket, key, ExtraArgs={"ContentType": content_type}
                 )
-                manifest["photos"].append(key)
+                # Re-uploading the same stable object key is harmless, but
+                # each photo must appear in the event manifest only once.
+                if key not in known_photos:
+                    photos.append(key)
+                    known_photos.add(key)
 
             self._save_manifest(event_slug, manifest)
 

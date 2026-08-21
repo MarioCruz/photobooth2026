@@ -88,8 +88,10 @@ def render_qr_screen(stage, url, heading, caption, lift=0):
     _paste_centered(img, qr, (cx, cy))
 
     # Heading stays put; caption/URL follow the card up so the grouping holds.
-    _text_centered(d, (cx, h // 14), heading, font(h // 18), FG)
-    _text_centered(d, (cx, h - h // 9 - lift), caption, font(h // 30), FG)
+    if heading:
+        _text_centered(d, (cx, h // 14), heading, font(h // 18), FG)
+    if caption:
+        _text_centered(d, (cx, h - h // 9 - lift), caption, font(h // 30), FG)
     _text_centered(d, (cx, h - h // 22 - lift), url, font(h // 45), MUTED)
     return img
 

@@ -53,7 +53,9 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 config = configparser.ConfigParser()
 config.read("config.ini")
 
-EVENT_TITLE = config.get("event", "title")
+# [event] title is what the web gallery headlines itself with -- gallery.py
+# reads it from config directly. The booth screen shows the instruction and
+# the logo badge instead, so it doesn't repeat the event name here.
 EVENT_HASHTAG = config.get("event", "hashtag", fallback="")
 
 NUM_PHOTOS = max(1, config.getint("camera", "num_photos", fallback=4))
@@ -108,7 +110,10 @@ window.bind("<Escape>", lambda e: window.destroy())
 # Three fixed bands placed at absolute coordinates -- header (event title),
 # stage (everything visual, rendered as one image by screens.py), footer
 # (status, button, logo) -- so no screen state can push another off the display.
-HEADER_H = max(70, screen_h // 11)
+# The header carries the instruction, in the largest type on the screen --
+# the branding is already on the logo badge in the footer, so repeating the
+# event title up here just spent the most legible row on saying it twice.
+HEADER_H = max(110, screen_h // 7)
 # Tall enough for the button, the big arrow pointing down at the real one,
 # and a logo badge with some presence.
 FOOTER_H = max(160, screen_h // 5)
@@ -127,9 +132,14 @@ QR_LIFT_PX = int(0.60 * (screen_h / (_screen_mm_h / 25.4)))
 
 header = tk.Frame(window, bg=BG)
 header.place(x=0, y=0, width=screen_w, height=HEADER_H)
-tk.Label(header, text=EVENT_TITLE, font=("Helvetica", 28, "bold"), bg=BG, fg=FG).pack(pady=(10, 0))
-if EVENT_HASHTAG:
-    tk.Label(header, text=EVENT_HASHTAG, font=("Helvetica", 15), bg=BG, fg=MUTED).pack()
+tk.Label(
+    header, text=f"Press the button for {NUM_PHOTOS} photos",
+    font=("Helvetica", 44, "bold"), bg=BG, fg=FG,
+).pack(pady=(14, 0))
+tk.Label(
+    header, text=f"Look at the camera — {NUM_PHOTOS} shots, 3-2-1 each",
+    font=("Helvetica", 18), bg=BG, fg=MUTED,
+).pack(pady=(2, 0))
 
 stage_photo = ImageTk.PhotoImage("RGB", STAGE)
 stage_label = tk.Label(window, image=stage_photo, bg=BG, bd=0, highlightthickness=0)
@@ -241,8 +251,8 @@ def go_idle():
     state.update(phase="idle", session_id=None, files=[], upload=None, collage_done=False)
     show(screens.render_qr_screen(
         STAGE, PARTY_GALLERY_URL,
-        f"Press the button to take {NUM_PHOTOS} photos",
         "Scan to see everyone's photos from the party",
+        EVENT_HASHTAG,  # instruction moved to the header, so this slot is free
         lift=QR_LIFT_PX,
     ))
     button_take_photos.config(state=tk.NORMAL, text="Take Photos")

@@ -14,6 +14,7 @@ Screen flow:
 import configparser
 import os
 import queue
+import socket
 import threading
 import tkinter as tk
 import uuid
@@ -32,6 +33,8 @@ SESSION_QR_DISPLAY_MS = 15 * 1000  # then show that guest's QR before returning 
 FAILURE_NOTICE_MS = 4 * 1000  # how long "saved, will upload later" stays up
 UPLOAD_GRACE_MS = 20 * 1000  # extra wait for a slow upload after the collage, before freeing the booth
 EVENT_POLL_MS = 100  # how often the Tk thread drains events from other threads
+NET_CHECK_MS = 20 * 1000  # how often to re-test that S3 is reachable
+OK = "#4ade80"  # online
 COLLAGE_SAVE_SIZE = (2048, 1536)  # the 4-up grid, saved and uploaded as its own photo
 # Set from several state transitions, so keep it in one place.
 BUTTON_IDLE_TEXT = "Push Button to Take Photos"
@@ -177,11 +180,23 @@ footer.columnconfigure(1, weight=0)
 footer.columnconfigure(2, weight=1, uniform="side")
 footer.rowconfigure(0, weight=1)
 
+# Bottom left, mirroring the logo badge: whether the booth can actually reach
+# S3 right now. Photos are never lost when it can't -- they queue and retry --
+# but it is the one thing worth knowing at a glance while running an event.
+status_column = tk.Frame(footer, bg=BG)
+status_column.grid(row=0, column=0, sticky="w", padx=24)
+
+net_label = tk.Label(
+    status_column, text="● Checking…", font=("Helvetica", 16, "bold"),
+    bg=BG, fg=MUTED, anchor="w",
+)
+net_label.pack(anchor="w")
+
 status_label = tk.Label(
-    footer, text="", font=("Helvetica", 15), bg=BG, fg=WARN,
+    status_column, text="", font=("Helvetica", 15), bg=BG, fg=WARN,
     anchor="w", justify="left", wraplength=screen_w // 3 - 60,
 )
-status_label.grid(row=0, column=0, sticky="w", padx=24)
+status_label.pack(anchor="w", pady=(2, 0))
 
 # Button sits high in the footer with an arrow beneath it, pointing down at
 # the physical button on the booth so guests know what to actually press.
@@ -464,6 +479,7 @@ def poll_events():
                 # Confirmed in S3 -- clear it from the crash-safe queue.
                 # (On failure it simply stays queued for the retry loop.)
                 pending.remove(session_id)
+                set_online(True)  # a completed upload is proof, no probe needed
             if session_id == state["session_id"]:
                 state["upload"] = (outcome, payload)
                 if state["phase"] == "collage":
@@ -474,6 +490,8 @@ def poll_events():
                 _advance_after_collage()
             elif state["phase"] == "idle":
                 refresh_pending_status()
+        elif kind == "net":
+            set_online(ev[1])
         elif kind == "retry_done":
             if state["phase"] == "idle":
                 refresh_pending_status()
@@ -504,6 +522,39 @@ def retry_pending_uploads():
     events.put(("retry_done",))
 
 
+# ---- connectivity indicator ----
+
+# Probe S3 itself, not just the wifi association: venue networks routinely
+# associate fine and then hold everything behind a captive portal, which would
+# read as "online" while every upload fails.
+S3_PROBE_HOST = f"s3.{config.get('aws', 'region', fallback='us-east-1')}.amazonaws.com"
+
+
+def _net_probe():
+    try:
+        socket.create_connection((S3_PROBE_HOST, 443), timeout=5).close()
+        events.put(("net", True))
+    except OSError:
+        events.put(("net", False))
+
+
+_net_thread = [None]
+
+
+def periodic_net_check():
+    t = _net_thread[0]
+    if not (t and t.is_alive()):
+        t = threading.Thread(target=_net_probe, daemon=True)
+        _net_thread[0] = t
+        t.start()
+    window.after(NET_CHECK_MS, periodic_net_check)
+
+
+def set_online(ok):
+    net_label.config(text="● Online" if ok else "● Offline — photos will queue",
+                     fg=OK if ok else ERR)
+
+
 _retry_thread = [None]
 
 
@@ -519,6 +570,7 @@ def periodic_retry():
 go_idle()
 blink_arrow()
 window.after(EVENT_POLL_MS, poll_events)
+window.after(300, periodic_net_check)  # show real connectivity promptly at boot
 window.after(2000, periodic_retry)  # give the app a moment to draw first
 
 window.mainloop()

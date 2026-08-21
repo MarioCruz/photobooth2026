@@ -40,6 +40,10 @@ COLLAGE_SAVE_SIZE = (2048, 1536)  # the 4-up grid, saved and uploaded as its own
 BG = "#111111"
 FG = "#f5f5f5"
 MUTED = "#9a9a9a"
+# For the instruction line: subordinate to the headline by size, not by being
+# dim -- MUTED is for incidental text like URLs, and was too faint to read
+# across a room.
+HINT = "#e2e2e2"
 WARN = "#ffb347"
 ERR = "#ff6b6b"
 ACCENT = "#1e6fff"
@@ -138,7 +142,7 @@ tk.Label(
 ).pack(pady=(14, 0))
 tk.Label(
     header, text=f"Look at the camera — {NUM_PHOTOS} shots, 3-2-1 each",
-    font=("Helvetica", 18), bg=BG, fg=MUTED,
+    font=("Helvetica", 20, "bold"), bg=BG, fg=HINT,
 ).pack(pady=(2, 0))
 
 stage_photo = ImageTk.PhotoImage("RGB", STAGE)

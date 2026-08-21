@@ -1,24 +1,42 @@
 #!/usr/bin/env python3
-"""Event photo booth: capture photos, upload to S3, show a QR code so
-guests can retrieve them from a web gallery. No email, no Twitter/X."""
+"""Event photo booth kiosk: live preview + countdown, a set of photos
+shown as a collage, upload to S3, and a QR code so guests can grab them
+from a web gallery. No email, no Twitter/X.
+
+Screen flow:
+  idle (QR for the whole event's gallery)
+    -> press button: live preview with 3-2-1 countdown, x NUM_PHOTOS
+    -> collage of the photos (upload happens in the background meanwhile)
+    -> QR for this guest's photos
+    -> back to idle
+"""
 
 import configparser
 import os
+import queue
+import threading
 import tkinter as tk
 import uuid
-from tkinter import messagebox
 
 from PIL import Image, ImageTk
 
 import pending
+import screens
 from camera import capture_images
-from collage import make_collage
 from gallery import GalleryUploader
-from qr import make_qr_image
 
 RETRY_INTERVAL_MS = 2 * 60 * 1000  # re-attempt any queued uploads every 2 minutes
 COLLAGE_DISPLAY_MS = 15 * 1000  # show the just-taken photos before the QR code
 SESSION_QR_DISPLAY_MS = 15 * 1000  # then show that guest's QR before returning to idle
+FAILURE_NOTICE_MS = 4 * 1000  # how long "saved, will upload later" stays up
+EVENT_POLL_MS = 100  # how often the Tk thread drains events from other threads
+
+BG = "#111111"
+FG = "#f5f5f5"
+MUTED = "#9a9a9a"
+WARN = "#ffb347"
+ERR = "#ff6b6b"
+ACCENT = "#1e6fff"
 
 config = configparser.ConfigParser()
 config.read("config.ini")
@@ -37,6 +55,11 @@ BUTTON_PIN = config.getint("camera", "button_pin", fallback=17)
 uploader = GalleryUploader(config)
 PARTY_GALLERY_URL = f"{uploader.website_base_url}/?event={uploader.event_slug}"
 
+# Tk isn't thread-safe: background threads (uploads, the GPIO button)
+# only ever talk to the UI by posting events here, drained on the Tk
+# thread by poll_events().
+events = queue.Queue()
+
 try:
     from gpiozero import Button as GPIOButton
 
@@ -46,54 +69,244 @@ try:
     # no external resistor. Falls back to on-screen-only if no button
     # is wired (e.g. developing off-Pi).
     capture_button = GPIOButton(BUTTON_PIN, bounce_time=0.2)
+    capture_button.when_pressed = lambda: events.put(("button",))
 except Exception:
     capture_button = None
 
 
-def on_countdown(count):
-    countdown_label.config(text=str(count) if count else "")
+# ---- window & layout ----
+
+window = tk.Tk()
+window.title("Photo Booth")
+window.configure(bg=BG)
+# Kiosk mode: no window manager is running, so "-fullscreen" (a WM hint)
+# has nothing to act on it. Size and place the window to the screen directly.
+screen_w = window.winfo_screenwidth()
+screen_h = window.winfo_screenheight()
+window.geometry(f"{screen_w}x{screen_h}+0+0")
+window.bind("<Escape>", lambda e: window.destroy())
+
+# Three fixed bands placed at absolute coordinates -- header (event title),
+# stage (everything visual, rendered as one image by screens.py), footer
+# (status, button, logo) -- so no screen state can push another off the display.
+HEADER_H = max(70, screen_h // 11)
+FOOTER_H = max(80, screen_h // 10)
+STAGE = (screen_w, screen_h - HEADER_H - FOOTER_H)
+PREVIEW_SIZE = screens.fit(RESOLUTION, (STAGE[0] - 24, STAGE[1] - 24))
+
+header = tk.Frame(window, bg=BG)
+header.place(x=0, y=0, width=screen_w, height=HEADER_H)
+tk.Label(header, text=EVENT_TITLE, font=("Helvetica", 28, "bold"), bg=BG, fg=FG).pack(pady=(10, 0))
+if EVENT_HASHTAG:
+    tk.Label(header, text=EVENT_HASHTAG, font=("Helvetica", 15), bg=BG, fg=MUTED).pack()
+
+stage_photo = ImageTk.PhotoImage("RGB", STAGE)
+stage_label = tk.Label(window, image=stage_photo, bg=BG, bd=0, highlightthickness=0)
+stage_label.place(x=0, y=HEADER_H, width=STAGE[0], height=STAGE[1])
+
+footer = tk.Frame(window, bg=BG)
+footer.place(x=0, y=HEADER_H + STAGE[1], width=screen_w, height=FOOTER_H)
+footer.columnconfigure(0, weight=1, uniform="side")
+footer.columnconfigure(1, weight=0)
+footer.columnconfigure(2, weight=1, uniform="side")
+footer.rowconfigure(0, weight=1)
+
+status_label = tk.Label(
+    footer, text="", font=("Helvetica", 15), bg=BG, fg=WARN,
+    anchor="w", justify="left", wraplength=screen_w // 2 - 80,
+)
+status_label.grid(row=0, column=0, sticky="w", padx=24)
+
+button_take_photos = tk.Button(
+    footer,
+    text="Take Photos",
+    font=("Helvetica", 18, "bold"),
+    command=lambda: start_session(),
+    bg=ACCENT, fg="white", activebackground="#4b8bff", activeforeground="white",
+    disabledforeground="#cfd8ff", bd=0, highlightthickness=0, padx=36, pady=10,
+)
+button_take_photos.grid(row=0, column=1)
+
+if os.path.exists("mtm.png"):
+    logo_img = Image.open("mtm.png")
+    logo_img.thumbnail((FOOTER_H - 20, FOOTER_H - 20))
+    logo_photo = ImageTk.PhotoImage(logo_img)
+    tk.Label(footer, image=logo_photo, bg=BG).grid(row=0, column=2, sticky="e", padx=24)
+
+
+def show(img):
+    stage_photo.paste(img)
+
+
+def set_status(text, color=WARN):
+    status_label.config(text=text, fg=color)
+
+
+# ---- session state machine ----
+
+state = {
+    "phase": "idle",  # idle | capturing | collage | qr | notice
+    "timers": [],
+    "session_id": None,
+    "files": [],
+    "upload": None,  # None while in flight, else ("ok", url) or ("fail", error)
+    "collage_done": False,
+}
+
+
+def schedule(ms, fn):
+    state["timers"].append(window.after(ms, fn))
+
+
+def cancel_timers():
+    for t in state["timers"]:
+        window.after_cancel(t)
+    state["timers"].clear()
+
+
+def refresh_pending_status():
+    n = len(pending.load())
+    set_status(f"{n} session(s) waiting to upload…" if n else "")
+
+
+def go_idle():
+    cancel_timers()
+    state.update(phase="idle", session_id=None, files=[], upload=None, collage_done=False)
+    show(screens.render_qr_screen(
+        STAGE, PARTY_GALLERY_URL,
+        "Press the button to take your photos!",
+        "Scan to see everyone's photos from the party",
+    ))
+    button_take_photos.config(state=tk.NORMAL, text="Take Photos")
+    refresh_pending_status()
+
+
+# Live-view callbacks. capture_images() blocks the Tk thread for the whole
+# countdown/shutter sequence, so each callback repaints via window.update(),
+# which also lets Tk service events (button, Escape, timers) meanwhile.
+live = {"frame": None, "count": None, "label": ""}
+
+
+def _redraw_live():
+    show(screens.render_preview(STAGE, live["frame"], live["count"], live["label"]))
     window.update()
 
 
-def show_qr(gallery_url, label_text="Scan to view & download your photos"):
-    qr_img = make_qr_image(gallery_url).resize((320, 320))
-    qr_photo = ImageTk.PhotoImage(qr_img)
-    qr_label.config(image=qr_photo, text="")
-    qr_label.image = qr_photo  # keep a reference so it isn't garbage collected
-    url_label.config(text=gallery_url)
-    scan_label.config(text=label_text)
-    qr_frame.pack(pady=10)
+def on_shot(i, n):
+    live["label"] = f"Photo {i} of {n}"
 
 
-def hide_qr():
-    qr_frame.pack_forget()
-    qr_label.config(image="", text="")
-    url_label.config(text="")
+def on_countdown(count):
+    live["count"] = count
+    _redraw_live()
 
 
-def show_idle_qr():
-    """Default 'waiting for a guest' screen: QR for the whole event
-    gallery (every session so far), not any one guest's photos."""
-    show_qr(PARTY_GALLERY_URL, "Scan to see everyone's photos from the party")
+def on_preview(frame):
+    live["frame"] = frame
+    _redraw_live()
 
 
-def show_collage(image_files):
-    collage_img = make_collage(image_files, max_size=(screen_w - 100, screen_h - 340))
-    collage_photo = ImageTk.PhotoImage(collage_img)
-    collage_label.config(image=collage_photo)
-    collage_label.image = collage_photo  # keep a reference so it isn't garbage collected
-    collage_frame.pack(pady=10)
+def start_session():
+    if state["phase"] not in ("idle", "qr", "notice"):
+        return  # ignore presses while capturing/uploading
+    cancel_timers()
+    state.update(
+        phase="capturing", session_id=uuid.uuid4().hex[:8], files=[], upload=None, collage_done=False
+    )
+    button_take_photos.config(state=tk.DISABLED, text="Taking photos…")
+    set_status("")
+    live.update(frame=None, count=None, label="Get ready!")
+    _redraw_live()
+
+    try:
+        files = capture_images(
+            NUM_PHOTOS,
+            resolution=RESOLUTION,
+            on_countdown=on_countdown,
+            on_preview=on_preview,
+            on_shot=on_shot,
+            logo_path=LOGO_PATH,
+            session_id=state["session_id"],
+            preview_size=PREVIEW_SIZE,
+        )
+    except Exception as e:
+        set_status(f"Camera problem: {e}", ERR)
+        state["phase"] = "notice"
+        schedule(FAILURE_NOTICE_MS, go_idle)
+        return
+
+    state.update(phase="collage", files=files)
+    show(screens.render_collage(STAGE, files))
+    button_take_photos.config(text="Uploading…")
+    set_status("Uploading your photos…")
+    threading.Thread(target=_upload_worker, args=(state["session_id"], files), daemon=True).start()
+    schedule(COLLAGE_DISPLAY_MS, _collage_done)
 
 
-def hide_collage():
-    collage_frame.pack_forget()
-    collage_label.config(image="")
+def _upload_worker(session_id, files):
+    try:
+        url = uploader.upload_session(files, session_id=session_id)
+        events.put(("upload", session_id, files, "ok", url))
+    except Exception as e:
+        events.put(("upload", session_id, files, "fail", e))
 
 
-def update_pending_label():
-    count = len(pending.load())
-    pending_label.config(text=f"{count} session(s) waiting to upload…" if count else "")
+def _collage_done():
+    state["collage_done"] = True
+    _advance_after_collage()
 
+
+def _advance_after_collage():
+    """Move on from the collage once BOTH its display time is up and the
+    upload has finished, one way or the other."""
+    if state["phase"] != "collage" or not state["collage_done"] or state["upload"] is None:
+        return
+    outcome, payload = state["upload"]
+    if outcome == "ok":
+        state["phase"] = "qr"
+        show(screens.render_qr_screen(
+            STAGE, payload, "Your photos are ready!", "Scan to view & download your photos"
+        ))
+        set_status("")
+        # The next guest can start while this QR is up.
+        button_take_photos.config(state=tk.NORMAL, text="Take Photos")
+        schedule(SESSION_QR_DISPLAY_MS, go_idle)
+    else:
+        # Photos are safe on disk; queue them for the periodic retry.
+        pending.add(state["session_id"], uploader.event_slug, state["files"])
+        state["phase"] = "notice"
+        set_status(
+            "Saved! Your photos will upload automatically once the wifi is back. "
+            f"({str(payload)[:80]})"
+        )
+        schedule(FAILURE_NOTICE_MS, go_idle)
+
+
+def poll_events():
+    """Drain events posted by background threads, on the Tk thread."""
+    while True:
+        try:
+            ev = events.get_nowait()
+        except queue.Empty:
+            break
+        kind = ev[0]
+        if kind == "button":
+            start_session()
+        elif kind == "upload":
+            _, session_id, files, outcome, payload = ev
+            if session_id == state["session_id"]:
+                state["upload"] = (outcome, payload)
+                _advance_after_collage()
+            elif outcome == "fail":
+                # A stale session's upload failed after we moved on -- never lose photos.
+                pending.add(session_id, uploader.event_slug, files)
+        elif kind == "retry_done":
+            if state["phase"] == "idle":
+                refresh_pending_status()
+    window.after(EVENT_POLL_MS, poll_events)
+
+
+# ---- upload retry queue (background thread) ----
 
 def retry_pending_uploads():
     """Retry any sessions that failed to upload earlier. Photos are never
@@ -111,134 +324,23 @@ def retry_pending_uploads():
             pending.remove(record["session_id"])
         except Exception:
             pass  # still no connection -- leave it queued, try again next interval
-    update_pending_label()
+    events.put(("retry_done",))
+
+
+_retry_thread = [None]
 
 
 def periodic_retry():
-    retry_pending_uploads()
+    t = _retry_thread[0]
+    if not (t and t.is_alive()):
+        t = threading.Thread(target=retry_pending_uploads, daemon=True)
+        _retry_thread[0] = t
+        t.start()
     window.after(RETRY_INTERVAL_MS, periodic_retry)
 
 
-def show_session_qr_then_idle(gallery_url):
-    hide_collage()
-    show_qr(gallery_url)
-    window.after(SESSION_QR_DISPLAY_MS, lambda: (hide_qr(), show_idle_qr()))
-
-
-def back_to_idle_after_collage():
-    hide_collage()
-    show_idle_qr()
-
-
-def on_take_photos():
-    hide_qr()
-    hide_collage()
-    button_take_photos.config(state=tk.DISABLED, text="Taking photos…")
-    window.update()
-
-    session_id = uuid.uuid4().hex[:8]
-    try:
-        image_files = capture_images(
-            NUM_PHOTOS,
-            resolution=RESOLUTION,
-            on_countdown=on_countdown,
-            logo_path=LOGO_PATH,
-            session_id=session_id,
-        )
-        show_collage(image_files)
-        button_take_photos.config(text="Uploading…")
-        window.update()
-
-        try:
-            gallery_url = uploader.upload_session(image_files, session_id=session_id)
-            window.after(COLLAGE_DISPLAY_MS, lambda: show_session_qr_then_idle(gallery_url))
-        except Exception as upload_err:
-            pending.add(session_id, uploader.event_slug, image_files)
-            update_pending_label()
-            messagebox.showwarning(
-                "Saved, upload pending",
-                "Photos are saved and will upload automatically once the "
-                f"connection is back. ({upload_err})",
-            )
-            window.after(COLLAGE_DISPLAY_MS, back_to_idle_after_collage)
-    except Exception as e:
-        messagebox.showerror("Error", f"Something went wrong: {e}")
-        show_idle_qr()
-    finally:
-        countdown_label.config(text="")
-        button_take_photos.config(state=tk.NORMAL, text="Take Photos")
-
-
-# ---- UI ----
-
-window = tk.Tk()
-window.title("Photo Booth")
-
-# Kiosk mode: no window manager is running, so "-fullscreen" (an EWMH/WM
-# hint) has nothing to act on it and the window shrinks to fit its content
-# at the default 0,0 position. Size and place it to the actual screen
-# directly instead, and center this content frame within that root.
-screen_w = window.winfo_screenwidth()
-screen_h = window.winfo_screenheight()
-window.geometry(f"{screen_w}x{screen_h}+0+0")
-window.bind("<Escape>", lambda e: window.destroy())
-
-content = tk.Frame(window)
-content.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
-
-label_welcome = tk.Label(content, text=EVENT_TITLE, font=("Helvetica", 22, "bold"))
-label_welcome.pack(pady=(20, 5), fill=tk.BOTH, anchor=tk.CENTER)
-
-if EVENT_HASHTAG:
-    label_hashtag = tk.Label(content, text=EVENT_HASHTAG, font=("Helvetica", 14))
-    label_hashtag.pack(pady=(0, 10), anchor=tk.CENTER)
-
-image = Image.open("mtm.png")
-photo = ImageTk.PhotoImage(image)
-label_image = tk.Label(content, image=photo)
-label_image.pack(pady=10)
-
-countdown_label = tk.Label(content, text="", font=("Helvetica", 60, "bold"), fg="blue")
-countdown_label.pack(pady=10)
-
-button_take_photos = tk.Button(
-    content,
-    text="Take Photos",
-    font=("Helvetica", 15, "bold"),
-    command=on_take_photos,
-    bg="blue",
-    fg="white",
-)
-button_take_photos.pack(padx=40, pady=20, fill=tk.BOTH, anchor=tk.CENTER)
-
-pending_label = tk.Label(content, text="", font=("Helvetica", 11), fg="darkorange")
-pending_label.pack(pady=(0, 5))
-
-collage_frame = tk.Frame(content)
-collage_label = tk.Label(collage_frame)
-collage_label.pack()
-
-qr_frame = tk.Frame(content)
-qr_label = tk.Label(qr_frame)
-qr_label.pack()
-url_label = tk.Label(qr_frame, font=("Helvetica", 11), fg="gray")
-url_label.pack()
-scan_label = tk.Label(qr_frame, text="Scan to view & download your photos", font=("Helvetica", 13, "bold"))
-scan_label.pack(before=qr_label)
-
-if capture_button:
-    # gpiozero fires when_pressed on its own thread; Tkinter isn't
-    # thread-safe, so hop back onto the main loop via window.after.
-    # Guard against re-triggering mid-capture the same way the
-    # on-screen button already does (it disables itself while busy).
-    def _on_physical_button():
-        if str(button_take_photos["state"]) == tk.NORMAL:
-            on_take_photos()
-
-    capture_button.when_pressed = lambda: window.after(0, _on_physical_button)
-
-show_idle_qr()  # default "waiting for a guest" screen: whole-party gallery
-update_pending_label()
+go_idle()
+window.after(EVENT_POLL_MS, poll_events)
 window.after(2000, periodic_retry)  # give the app a moment to draw first
 
 window.mainloop()

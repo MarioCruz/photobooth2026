@@ -9,6 +9,7 @@ bucket has no public listing permission.
 
 import json
 import secrets
+import threading
 import uuid
 
 import boto3
@@ -46,6 +47,10 @@ class GalleryUploader:
             # Fail fast instead of hanging the UI on dead/flaky venue wifi.
             config=Config(connect_timeout=5, read_timeout=15, retries={"max_attempts": 2}),
         )
+        # Uploads run on background threads (a guest's session and the
+        # retry queue can overlap); serialize them so the shared per-event
+        # manifest is never read-modify-written concurrently.
+        self._lock = threading.Lock()
 
     def _manifest_key(self, event_slug):
         return f"{event_slug}/manifest.json"
@@ -79,19 +84,20 @@ class GalleryUploader:
         """
         session_id = session_id or uuid.uuid4().hex[:8]
         event_slug = event_slug or self.event_slug
-        manifest = self._load_manifest(event_slug)
-        if event_slug == self.event_slug:
-            manifest["title"] = self.event_title  # keep in sync with config.ini
+        with self._lock:
+            manifest = self._load_manifest(event_slug)
+            if event_slug == self.event_slug:
+                manifest["title"] = self.event_title  # keep in sync with config.ini
 
-        for i, path in enumerate(image_files):
-            ext = path.split(".")[-1].lower()
-            content_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
-            key = f"{event_slug}/photos/{session_id}-{i}.{ext}"
-            self.client.upload_file(
-                path, self.bucket, key, ExtraArgs={"ContentType": content_type}
-            )
-            manifest["photos"].append(key)
+            for i, path in enumerate(image_files):
+                ext = path.split(".")[-1].lower()
+                content_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
+                key = f"{event_slug}/photos/{session_id}-{i}.{ext}"
+                self.client.upload_file(
+                    path, self.bucket, key, ExtraArgs={"ContentType": content_type}
+                )
+                manifest["photos"].append(key)
 
-        self._save_manifest(event_slug, manifest)
+            self._save_manifest(event_slug, manifest)
 
         return f"{self.website_base_url}/?event={event_slug}&session={session_id}"

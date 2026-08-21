@@ -118,18 +118,29 @@ def render_preview(stage, frame, count=None, label=""):
     return img
 
 
-def render_collage(stage, image_files, caption=""):
-    """The session's photos in a 2x2 grid, with an optional caption above."""
+def render_collage(stage, image_files, caption="", status=""):
+    """The session's photos in a 2x2 grid, with an optional caption above and
+    status line below. The grid is 4:3 and the screen is not, so the bands cost
+    it very little height -- they sit in space that was letterboxed anyway."""
     w, h = stage
-    cap_h = int(h * 0.14) if caption else 0
+    cap_h = int(h * 0.13) if caption else 0
     body = (w, h - cap_h)
     gap = max(8, h // 60)
     photos = make_collage(image_files, body, gap=gap, bg=BG)
 
-    if not caption:
+    if not (caption or status):
         return photos
     img = Image.new("RGB", stage, BG)
     img.paste(photos, (0, cap_h))
     d = ImageDraw.Draw(img)
-    _text_centered(d, (w // 2, cap_h // 2), caption, font(int(cap_h * 0.52)), FG)
+    if caption:
+        _text_centered(d, (w // 2, cap_h // 2), caption, font(int(cap_h * 0.55)), FG)
+    if status:
+        # Tucked into the caption band, left of the centred title. Reserving a
+        # band of its own would cost height, the one dimension a 4:3 grid on a
+        # wide screen is actually short of, and the side letterbox is too
+        # narrow to hold a line of text without running over the photos.
+        size = max(14, int(h * 0.026))
+        y = cap_h // 2 if cap_h else h - int(size * 1.9)
+        d.text((int(w * 0.03), y), status, font=font(size), fill=MUTED, anchor="lm")
     return img

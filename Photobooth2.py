@@ -360,15 +360,24 @@ def start_session():
     # which is the point of the reveal. A row of four fills the width but only
     # by centre-cropping to portrait, which turned a wide shot into four
     # near-identical slices.
-    show_overlay(screens.render_collage(
-        OVERLAY_STAGE, files[:-1] if len(files) > 1 else files,
-        caption="Here are your photos!"))
+    show_reveal("Uploading your photos…")
     button_take_photos.config(text="Uploading…")
     set_status("Uploading your photos…")
     with _uploading_lock:
         _uploading.add(state["session_id"])
     threading.Thread(target=_upload_worker, args=(state["session_id"], files), daemon=True).start()
     schedule(COLLAGE_DISPLAY_MS, _collage_done)
+
+
+def show_reveal(status):
+    """Redraw the reveal with a new status line. The footer is covered while
+    this is up, so the upload's progress has to live on the overlay itself."""
+    files = state["files"]
+    photos = files[:-1] if len(files) > 1 else files
+    if not photos:
+        return
+    show_overlay(screens.render_collage(
+        OVERLAY_STAGE, photos, caption="Here are your photos!", status=status))
 
 
 def _upload_worker(session_id, files):
@@ -457,6 +466,11 @@ def poll_events():
                 pending.remove(session_id)
             if session_id == state["session_id"]:
                 state["upload"] = (outcome, payload)
+                if state["phase"] == "collage":
+                    # Still mid-reveal: say what happened rather than leaving
+                    # "Uploading…" on screen for the rest of the 15 seconds.
+                    show_reveal("Uploaded! Your code is coming up…" if outcome == "ok"
+                                else "Saved — they'll upload when the wifi is back")
                 _advance_after_collage()
             elif state["phase"] == "idle":
                 refresh_pending_status()

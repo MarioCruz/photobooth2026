@@ -168,9 +168,9 @@ button_take_photos = tk.Button(
 button_take_photos.pack()
 
 arrow_label = tk.Label(
-    button_column, text="▼", font=("Helvetica", 52, "bold"), bg=BG, fg=ACCENT
+    button_column, text="▼", font=("Helvetica", 60, "bold"), bg=BG, fg=ACCENT
 )
-arrow_label.pack(pady=(0, 0))
+arrow_label.pack(pady=(14, 0))  # sits clear of the button, closer to the real one
 
 ARROW_BLINK_MS = 600
 _arrow_on = [True]

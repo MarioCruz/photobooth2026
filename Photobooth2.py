@@ -469,7 +469,7 @@ def poll_events():
                 if state["phase"] == "collage":
                     # Still mid-reveal: say what happened rather than leaving
                     # "Uploading…" on screen for the rest of the 15 seconds.
-                    show_reveal("Uploaded! Your code is coming up…" if outcome == "ok"
+                    show_reveal("Uploaded!" if outcome == "ok"
                                 else "Saved — they'll upload when the wifi is back")
                 _advance_after_collage()
             elif state["phase"] == "idle":

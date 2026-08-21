@@ -127,8 +127,8 @@ STAGE = (screen_w, screen_h - HEADER_H - FOOTER_H)
 # While posing, the live view takes the whole screen rather than the middle
 # band -- a 4:3 frame inside a 16:9 stage is height-limited, so giving it the
 # header and footer rows back makes it noticeably bigger to frame yourself in.
-PREVIEW_STAGE = (screen_w, screen_h)
-PREVIEW_SIZE = screens.fit(RESOLUTION, (PREVIEW_STAGE[0] - 16, PREVIEW_STAGE[1] - 16))
+OVERLAY_STAGE = (screen_w, screen_h)
+PREVIEW_SIZE = screens.fit(RESOLUTION, (OVERLAY_STAGE[0] - 16, OVERLAY_STAGE[1] - 16))
 
 # Raise the QR code off centre so it sits at a comfortable height to scan.
 # Derived from the display's reported physical size rather than hardcoded, so
@@ -163,18 +163,12 @@ stage_photo = ImageTk.PhotoImage("RGB", STAGE)
 stage_label = tk.Label(window, image=stage_photo, bg=BG, bd=0, highlightthickness=0)
 stage_label.place(x=0, y=HEADER_H, width=STAGE[0], height=STAGE[1])
 
-# Full-screen overlay used only while posing (see PREVIEW_STAGE above).
-preview_photo = ImageTk.PhotoImage("RGB", PREVIEW_STAGE)
-preview_label = tk.Label(window, image=preview_photo, bg=BG, bd=0, highlightthickness=0)
-
-# The collage reveal takes the header row as well as the stage. A 2x2 grid of
-# 4:3 photos is itself 4:3, and the stage band alone is nearly 3:1, so the
-# grid was height-limited to about half the screen width with wide black
-# margins. It stops short of the footer so the upload status and the button
-# stay visible for the next guest.
-COLLAGE_STAGE = (screen_w, HEADER_H + STAGE[1])
-collage_photo = ImageTk.PhotoImage("RGB", COLLAGE_STAGE)
-collage_label = tk.Label(window, image=collage_photo, bg=BG, bd=0, highlightthickness=0)
+# One full-screen layer, used for both the live view while posing and the
+# reveal afterwards. Taking the whole screen rather than just the middle band
+# is what makes each of them big: a 4:3 frame inside a 16:9 stage is
+# height-limited, so the header and footer rows were pure cost.
+overlay_photo = ImageTk.PhotoImage("RGB", OVERLAY_STAGE)
+overlay_label = tk.Label(window, image=overlay_photo, bg=BG, bd=0, highlightthickness=0)
 
 footer = tk.Frame(window, bg=BG)
 footer.place(x=0, y=HEADER_H + STAGE[1], width=screen_w, height=FOOTER_H)
@@ -230,26 +224,15 @@ def show(img):
     stage_photo.paste(img)
 
 
-def show_fullscreen_preview(img):
-    preview_photo.paste(img)
-    if not preview_label.winfo_ismapped():
-        preview_label.place(x=0, y=0, width=PREVIEW_STAGE[0], height=PREVIEW_STAGE[1])
-        preview_label.lift()
+def show_overlay(img):
+    overlay_photo.paste(img)
+    if not overlay_label.winfo_ismapped():
+        overlay_label.place(x=0, y=0, width=OVERLAY_STAGE[0], height=OVERLAY_STAGE[1])
+        overlay_label.lift()
 
 
-def hide_fullscreen_preview():
-    preview_label.place_forget()
-
-
-def show_big_collage(img):
-    collage_photo.paste(img)
-    if not collage_label.winfo_ismapped():
-        collage_label.place(x=0, y=0, width=COLLAGE_STAGE[0], height=COLLAGE_STAGE[1])
-        collage_label.lift()
-
-
-def hide_big_collage():
-    collage_label.place_forget()
+def hide_overlay():
+    overlay_label.place_forget()
 
 
 def set_status(text, color=WARN):
@@ -285,8 +268,7 @@ def refresh_pending_status():
 
 def go_idle():
     cancel_timers()
-    hide_fullscreen_preview()  # belt and braces if a session ended unusually
-    hide_big_collage()
+    hide_overlay()  # belt and braces if a session ended unusually
     set_headline(HEADLINE_IDLE)
     state.update(phase="idle", session_id=None, files=[], upload=None, collage_done=False)
     show(screens.render_qr_screen(
@@ -306,8 +288,8 @@ live = {"frame": None, "count": None, "label": ""}
 
 
 def _redraw_live():
-    show_fullscreen_preview(
-        screens.render_preview(PREVIEW_STAGE, live["frame"], live["count"], live["label"])
+    show_overlay(
+        screens.render_preview(OVERLAY_STAGE, live["frame"], live["count"], live["label"])
     )
     window.update()
 
@@ -350,13 +332,13 @@ def start_session():
             preview_size=PREVIEW_SIZE,
         )
     except Exception as e:
-        hide_fullscreen_preview()
+        hide_overlay()
         set_status(f"Camera problem: {e}", ERR)
         state["phase"] = "notice"
         schedule(FAILURE_NOTICE_MS, go_idle)
         return
 
-    hide_fullscreen_preview()
+    hide_overlay()
 
     # Save the 4-up grid as a photo in its own right, so guests can share the
     # whole strip as one image. It rides along as the session's last photo, so
@@ -378,8 +360,8 @@ def start_session():
     # which is the point of the reveal. A row of four fills the width but only
     # by centre-cropping to portrait, which turned a wide shot into four
     # near-identical slices.
-    show_big_collage(screens.render_collage(
-        COLLAGE_STAGE, files[:-1] if len(files) > 1 else files,
+    show_overlay(screens.render_collage(
+        OVERLAY_STAGE, files[:-1] if len(files) > 1 else files,
         caption="Here are your photos!"))
     button_take_photos.config(text="Uploading…")
     set_status("Uploading your photos…")
@@ -415,7 +397,7 @@ def _upload_grace_expired():
     if state["phase"] != "collage" or state["upload"] is not None:
         return  # the upload resolved in time; this timer is stale
     state["phase"] = "notice"
-    hide_big_collage()
+    hide_overlay()
     set_headline(HEADLINE_SAVED)
     button_take_photos.config(state=tk.NORMAL, text=BUTTON_IDLE_TEXT)
     set_status(
@@ -433,7 +415,7 @@ def _advance_after_collage():
     outcome, payload = state["upload"]
     if outcome == "ok":
         state["phase"] = "qr"
-        hide_big_collage()
+        hide_overlay()
         set_headline(HEADLINE_READY)
         show(screens.render_qr_screen(
             STAGE, payload, "Scan to view & download your photos",
@@ -447,7 +429,7 @@ def _advance_after_collage():
         # Already in the pending queue (sessions enqueue before uploading);
         # the periodic retry finishes the job once the wifi is back.
         state["phase"] = "notice"
-        hide_big_collage()
+        hide_overlay()
         set_headline(HEADLINE_SAVED)
         button_take_photos.config(state=tk.NORMAL, text=BUTTON_IDLE_TEXT)
         set_status(
